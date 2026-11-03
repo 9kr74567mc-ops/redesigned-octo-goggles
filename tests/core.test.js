@@ -115,3 +115,15 @@ test('unit conversion', () => {
   assert.equal(state.exercises[0].increment, 5);
   assert.equal(state.workouts[0].entries[0].sets[0].weight, 45.5);
 });
+
+test('any exercise with a TM gets 5/3/1 sets, honoring its own rounding', () => {
+  const settings = { rounding: 2.5, warmups: false };
+  const week = core.getWeeks(settings)[0];
+  const db = { id: 'idb', name: 'Incline Dumbbell Press', tm: 31, rounding: 2 };
+  assert.deepEqual(core.mainSets(db, week, settings).map((s) => s.weight), [20, 24, 26]);
+  const bar = { id: 'x', name: 'Front Squat', tm: 100 };
+  assert.deepEqual(core.mainSets(bar, week, settings).map((s) => s.weight), [65, 75, 85]);
+  const { entries } = core.buildSession({ template: { mainLiftId: 'idb', supplemental: { type: 'fsl', sets: 5, reps: 5 } }, exercises: [db], settings, weekIndex: 0 });
+  assert.equal(entries[0].sets.at(-1).amrap, true);
+  assert.equal(entries[1].sets[0].weight, 20);
+});

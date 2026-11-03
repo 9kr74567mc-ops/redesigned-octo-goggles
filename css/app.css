@@ -218,7 +218,13 @@ input.wide { width: 170px; }
 .table tr[data-action] { cursor: pointer; }
 
 /* program */
-.acc-row { display: grid; grid-template-columns: 1fr 48px 10px 48px 36px 36px; gap: 6px; align-items: center; margin-bottom: 8px; }
+.select-btn { appearance: none; border: 1.5px solid transparent; background: var(--card-2); color: var(--text); font: inherit; text-align: left; border-radius: 10px; padding: 10px 30px 10px 12px; width: 100%; min-width: 0; cursor: pointer; position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.select-btn::after { content: "›"; position: absolute; right: 12px; top: 50%; transform: translateY(-52%); color: var(--muted); font-size: 20px; }
+.pick:not([hidden]) { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.pick.special { color: var(--accent); font-weight: 600; border-radius: 10px; margin-bottom: 8px; }
+.acc-row .select-btn { grid-column: 1 / -1; }
+.acc-row [data-action="acc-move"] { grid-column: 5; }
+.acc-row { padding-bottom: 8px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 56px 14px 56px 1fr 36px 36px; gap: 6px; align-items: center; margin-bottom: 8px; }
 .acc-row input { text-align: center; padding: 10px 4px; }
 .acc-row .x { color: var(--muted); text-align: center; }
 

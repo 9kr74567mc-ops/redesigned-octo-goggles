@@ -8,6 +8,7 @@ An offline-first web app (PWA) for Jim Wendler's 5/3/1. Add it to your iPhone ho
 - **5/3/1 programming**: training maxes entered directly (no hidden 90% multiplier), 5s / 3s / 5/3/1 weeks plus optional deload, 3/5/1 week order, classic PR (AMRAP) sets or 5's PRO, optional warm-ups, rounding to your smallest plate.
 - **Supplemental templates**: FSL, SSL, BBB, BBS, or a custom % of TM, with sets/reps you can change.
 - **Exercise library**: about 250 built-in exercises and variations (barbell, dumbbell, cable, machine, paused, deficit, tempo…) in 10 groups, searchable with abbreviations like `db row`, `rdl`, `ohp`.
+- **Any exercise as a 5/3/1 main lift**: pick any variation (e.g. Incline Dumbbell Press) as a day's main or supplemental lift, or add it mid-workout with 5/3/1 sets. Optional per-exercise rounding (e.g. 2 kg dumbbell jumps).
 - **Customizable exercises**: add, rename or delete main lifts and accessories; each main lift has its own TM and per-cycle increment.
 - **Customizable training days**: choose 1–7 days per week; each day has a name, any exercise as its main lift (with its training max), supplemental work, and an ordered accessory list.
 - **Workout logging**: pre-filled weights, tap ✓ to log a set, editable weight/reps, add/remove sets and exercises, plate breakdown for every bar weight, rest timer with sound, workout notes.

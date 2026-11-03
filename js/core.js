@@ -110,23 +110,29 @@ const makeSet = (o) => ({ kind: 'work', pct: null, weight: null, targetReps: nul
  * Build the entries for a session (template) in a given week.
  * `exercises` is an array; `history` is the list of completed workouts (used to prefill accessories).
  */
+/** Weight for `pct` of a lift's TM, using the lift's own rounding if it has one. */
+export function liftWeight(lift, pct, settings) {
+  return lift && lift.tm > 0 ? roundTo(lift.tm * pct, lift.rounding > 0 ? lift.rounding : settings.rounding || 5) : null;
+}
+
+/** Warm-ups (optional) plus the week's three 5/3/1 sets for any lift with a training max. */
+export function mainSets(lift, week, settings) {
+  const sets = [];
+  if (settings.warmups !== false) {
+    WARMUP_SETS.forEach((s) => sets.push(makeSet({ kind: 'warmup', pct: s.pct, weight: liftWeight(lift, s.pct, settings), targetReps: s.reps })));
+  }
+  week.sets.forEach((s) => sets.push(makeSet({ kind: 'main', pct: s.pct, weight: liftWeight(lift, s.pct, settings), targetReps: s.reps, amrap: !!s.amrap })));
+  return sets;
+}
+
 export function buildSession({ template, exercises, settings, weekIndex, history = [] }) {
   const weeks = getWeeks(settings);
   const week = weeks[Math.min(Math.max(weekIndex, 0), weeks.length - 1)];
   const byId = Object.fromEntries(exercises.map((e) => [e.id, e]));
-  const rounding = settings.rounding || 5;
-  const at = (tm, pct) => (tm > 0 ? roundTo(tm * pct, rounding) : null);
   const entries = [];
 
   const main = byId[template.mainLiftId];
-  if (main) {
-    const sets = [];
-    if (settings.warmups !== false) {
-      WARMUP_SETS.forEach((s) => sets.push(makeSet({ kind: 'warmup', pct: s.pct, weight: at(main.tm, s.pct), targetReps: s.reps })));
-    }
-    week.sets.forEach((s) => sets.push(makeSet({ kind: 'main', pct: s.pct, weight: at(main.tm, s.pct), targetReps: s.reps, amrap: !!s.amrap })));
-    entries.push({ id: uid(), exerciseId: main.id, name: main.name, role: 'main', sets });
-  }
+  if (main) entries.push({ id: uid(), exerciseId: main.id, name: main.name, role: 'main', sets: mainSets(main, week, settings) });
 
   const supp = template.supplemental || { type: 'none' };
   const skipSupp = week.deload && settings.deloadSupplemental !== true;
@@ -137,7 +143,7 @@ export function buildSession({ template, exercises, settings, weekIndex, history
       const pct = supplementalPct(supp.type, week, supp.pct);
       const nSets = supp.sets || def.sets;
       const reps = supp.reps || def.reps;
-      const sets = Array.from({ length: nSets }, () => makeSet({ kind: 'supplemental', pct, weight: at(lift.tm, pct), targetReps: reps }));
+      const sets = Array.from({ length: nSets }, () => makeSet({ kind: 'supplemental', pct, weight: liftWeight(lift, pct, settings), targetReps: reps }));
       entries.push({ id: uid(), exerciseId: lift.id, name: lift.name, role: 'supplemental', label: def.label, sets });
     }
   }
