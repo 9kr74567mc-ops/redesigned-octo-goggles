@@ -393,3 +393,24 @@ export function groupInfo(entries) {
   }
   return out;
 }
+
+// ---------- backup reminder ----------
+
+/**
+ * A backup is due when there are workouts newer than the last backup AND either a 5/3/1 cycle
+ * has been completed since then, or it has been `days` days. Snoozing hides it until `snoozeUntil`.
+ */
+export function backupDue(state, now = new Date(), days = 30) {
+  const last = state.lastBackupAt ? Date.parse(state.lastBackupAt) : null;
+  if (state.backupSnoozeUntil && now.getTime() < Date.parse(state.backupSnoozeUntil)) return null;
+  const stamp = (w) => Date.parse(w.finishedAt || w.startedAt || `${w.date}T12:00:00`);
+  const fresh = (state.workouts || []).filter((w) => last == null || stamp(w) > last);
+  if (!fresh.length) return null;
+  const baseCycle = state.lastBackupCycle ?? 1;
+  const cyclesDone = (state.cycle.number - baseCycle) + (state.cycle.complete ? 1 : 0);
+  const since = last ?? Math.min(...fresh.map(stamp));
+  const daysSince = Math.floor((now.getTime() - since) / 86400000);
+  if (cyclesDone >= 1) return { reason: 'cycle', workouts: fresh.length, daysSince };
+  if (daysSince >= days) return { reason: 'time', workouts: fresh.length, daysSince };
+  return null;
+}

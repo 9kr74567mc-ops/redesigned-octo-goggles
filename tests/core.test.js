@@ -170,3 +170,21 @@ test('templates build supersets, drop sets; drops excluded from e1RM', () => {
   const w = { id: 'w', date: '2026-01-01', entries: [{ exerciseId: 'c', sets: [{ done: true, weight: 20, reps: 10 }, { done: true, weight: 40, reps: 10, style: 'drop' }] }] };
   assert.equal(core.bestE1rm([w], 'c'), core.e1rm(20, 10));
 });
+
+test('backup reminder after each cycle or 30 days', () => {
+  const now = new Date('2026-11-03T12:00:00Z');
+  const w = (d) => ({ id: d, date: d.slice(0, 10), finishedAt: d });
+  const base = { cycle: { number: 1, complete: false }, workouts: [w('2026-10-25T10:00:00Z')] };
+  assert.equal(core.backupDue(base, now), null); // 9 days, mid-cycle
+  assert.equal(core.backupDue({ ...base, cycle: { number: 1, complete: true } }, now).reason, 'cycle');
+  assert.equal(core.backupDue({ ...base, cycle: { number: 2, complete: false } }, now).reason, 'cycle');
+  assert.equal(core.backupDue({ ...base, workouts: [w('2026-09-20T10:00:00Z')] }, now).reason, 'time');
+  // backed up after cycle 1; cycle 2 under way with new workouts → not yet
+  const after = { cycle: { number: 2, complete: false }, lastBackupAt: '2026-10-26T00:00:00Z', lastBackupCycle: 2, workouts: [w('2026-10-25T10:00:00Z'), w('2026-11-01T10:00:00Z')] };
+  assert.equal(core.backupDue(after, now), null);
+  assert.equal(core.backupDue({ ...after, cycle: { number: 2, complete: true } }, now).workouts, 1);
+  // nothing new since backup → never due
+  assert.equal(core.backupDue({ ...after, workouts: [w('2026-10-25T10:00:00Z')], cycle: { number: 3, complete: true } }, now), null);
+  // snoozed
+  assert.equal(core.backupDue({ ...base, cycle: { number: 2 }, backupSnoozeUntil: '2026-11-05T00:00:00Z' }, now), null);
+});

@@ -19,7 +19,7 @@ An offline-first web app (PWA) for Jim Wendler's 5/3/1. Add it to your iPhone ho
 - **History and calendar**: month calendar with workout days (deload days in blue), a list view, editable past workouts, and logging workouts for any past date.
 - **Progress**: e1RM chart with the training max overlaid, best/latest e1RM, rep records, and recent sessions.
 - **Calculators**: plate loader and 1RM / percentage table.
-- **Backups**: JSON export/import (uses the iOS share sheet) and a CSV export of every set.
+- **Backups**: JSON export/import (uses the iOS share sheet), a reminder after every completed cycle (or 30 days) when there are workouts not yet backed up, and a CSV export of every set.
 - Light/dark mode, safe-area aware, works offline via a service worker.
 
 ## Install on iPhone

@@ -140,6 +140,8 @@ function viewToday() {
       <span class="btn primary small">Resume</span></a>`;
   }
 
+  h += backupBanner();
+
   const missing = programmedLifts().filter((e) => !(e.tm > 0));
   if (missing.length) {
     h += `<section class="card">
@@ -823,7 +825,7 @@ function viewSettings() {
     <button class="link" data-action="force-cycle-end">End cycle now & review training maxes</button>
   </section>
   <section class="card"><h2>Data</h2>
-    <p class="muted small">Everything is stored on this device only. Export a backup now and then — iOS can clear website data if the app goes unused for weeks.</p>
+    <p class="muted small">Everything is stored on this device only. Export a backup after each cycle — the Train screen reminds you — and keep it in Files or iCloud Drive. <b>Last backup: ${S.lastBackupAt ? dateFmt(core.isoDate(new Date(S.lastBackupAt)), { month: 'short', day: 'numeric', year: 'numeric' }) : 'never'}</b>.</p>
     <div class="btn-row"><button class="btn" data-action="export-json">Export backup</button><button class="btn" data-action="import-json">Import backup</button><button class="btn" data-action="export-csv">Export CSV</button></div>
     <input type="file" accept="application/json,.json" id="import-file" hidden>
     <button class="link danger" data-action="reset-all">Erase all data</button>
@@ -934,8 +936,8 @@ async function shareOrDownload(text, name, type) {
   const blob = new Blob([text], { type });
   try {
     const file = new File([blob], name, { type });
-    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
-  } catch (e) { if (e?.name === 'AbortError') return; }
+    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return true; }
+  } catch (e) { if (e?.name === 'AbortError') return false; }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -943,6 +945,31 @@ async function shareOrDownload(text, name, type) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  return true;
+}
+
+async function exportBackup() {
+  const ok = await shareOrDownload(JSON.stringify(S, null, 2), `531-backup-${core.isoDate()}.json`, 'application/json');
+  if (!ok) return;
+  S.lastBackupAt = new Date().toISOString();
+  S.lastBackupCycle = S.cycle.number + (S.cycle.complete ? 1 : 0);
+  delete S.backupSnoozeUntil;
+  persist();
+  toast('Backup saved — keep it in Files or iCloud Drive');
+  render();
+}
+
+function backupBanner() {
+  const due = core.backupDue(S);
+  if (!due) return '';
+  const last = S.lastBackupAt ? dateFmt(core.isoDate(new Date(S.lastBackupAt)), { month: 'short', day: 'numeric' }) : null;
+  const why = due.reason === 'cycle' ? 'You finished a training cycle' : `It's been ${due.daysSince} days`;
+  return `<section class="card backup-card">
+    <div class="eyebrow">Backup</div>
+    <strong>${why} — back up your training</strong>
+    <p class="muted small">${due.workouts} workout${due.workouts === 1 ? '' : 's'} not in a backup yet · last backup: ${last || 'never'}. Your data lives only on this phone; save the file to Files or iCloud Drive.</p>
+    <div class="btn-row"><button class="btn primary small" data-action="export-json">Back up now</button><button class="btn small" data-action="snooze-backup">Remind me in 3 days</button></div>
+  </section>`;
 }
 
 function csv() {
@@ -1291,7 +1318,8 @@ const actions = {
     S.cycle.complete = true;
     persist(); go('#/today');
   },
-  'export-json'() { shareOrDownload(JSON.stringify(S, null, 2), `531-backup-${core.isoDate()}.json`, 'application/json'); },
+  'export-json'() { exportBackup(); },
+  'snooze-backup'() { S.backupSnoozeUntil = new Date(Date.now() + 3 * 86400000).toISOString(); persist(); render(); toast("OK — I'll remind you in 3 days"); },
   'export-csv'() { shareOrDownload(csv(), `531-sets-${core.isoDate()}.csv`, 'text/csv'); },
   'import-json'() { document.getElementById('import-file').click(); },
   'reset-all'() {
