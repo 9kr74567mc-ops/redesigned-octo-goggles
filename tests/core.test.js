@@ -1,0 +1,118 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import * as core from '../js/core.js';
+
+const settings = { rounding: 5, warmups: true, deload: true, weekOrder: '531', mainStyle: 'amrap' };
+
+test('weeks follow 5/3/1 percentages', () => {
+  const weeks = core.getWeeks(settings);
+  assert.equal(weeks.length, 4);
+  assert.deepEqual(weeks[0].sets.map((s) => s.pct), [0.65, 0.75, 0.85]);
+  assert.deepEqual(weeks[2].sets.map((s) => s.reps), [5, 3, 1]);
+  assert.equal(weeks[2].sets[2].amrap, true);
+  assert.equal(weeks[3].deload, true);
+  assert.equal(core.getWeeks({ ...settings, deload: false }).length, 3);
+  assert.equal(core.getWeeks({ ...settings, weekOrder: '351' })[0].key, '3s');
+  const pro = core.getWeeks({ ...settings, mainStyle: 'fivespro' });
+  assert.ok(pro.every((w) => w.sets.every((s) => s.reps === 5 && !s.amrap)));
+});
+
+test('rounding and training max', () => {
+  assert.equal(core.roundTo(187.4, 5), 185);
+  assert.equal(core.roundTo(188, 5), 190);
+  assert.equal(core.roundTo(101.3, 2.5), 102.5);
+  assert.equal(core.trainingMaxFrom1rm(300, 0.9, 5), 270);
+});
+
+test('e1RM formulas', () => {
+  assert.equal(core.e1rm(200, 1), 200);
+  assert.equal(core.e1rm(200, 5), 200 * (1 + 5 / 30));
+  assert.ok(Math.abs(core.e1rm(200, 5, 'brzycki') - 225) < 1e-9);
+  assert.equal(core.e1rm(0, 5), 0);
+  assert.equal(core.e1rm(100, 0), 0);
+});
+
+test('reps to beat a PR', () => {
+  // 225 x 8 epley = 285; at 245 need e1rm > 285 -> 245*(1+r/30) > 285 -> r > 4.9 -> 5
+  assert.equal(core.repsToBeat(245, 285), 5);
+  assert.equal(core.repsToBeat(245, 0), 1);
+  assert.equal(core.repsToBeat(100, 10000), null);
+});
+
+test('plate breakdown', () => {
+  const p = core.plateBreakdown(225, 45, [45, 35, 25, 10, 5, 2.5]);
+  assert.deepEqual(p.perSide, [45, 45]);
+  assert.equal(p.remainder, 0);
+  assert.equal(core.plateBreakdown(30, 45, [45]).belowBar, true);
+  const r = core.plateBreakdown(102, 45, [45, 25, 10, 5, 2.5]);
+  assert.deepEqual(r.perSide, [25, 2.5]);
+  assert.equal(r.remainder, 2);
+});
+
+test('buildSession produces warmups, main sets, supplemental and accessories', () => {
+  const exercises = [
+    { id: 'sq', name: 'Squat', category: 'main', tm: 300 },
+    { id: 'lr', name: 'Leg Raise', category: 'accessory' },
+  ];
+  const template = { id: 't', mainLiftId: 'sq', supplemental: { type: 'fsl', sets: 5, reps: 5 }, accessories: [{ exerciseId: 'lr', sets: 3, reps: 12 }] };
+  const history = [{ id: 'w0', date: '2026-01-01', entries: [{ exerciseId: 'lr', sets: [{ done: true, weight: 20, reps: 12 }] }] }];
+  const { entries, week } = core.buildSession({ template, exercises, settings, weekIndex: 2, history });
+  assert.equal(week.key, '531');
+  const main = entries[0];
+  assert.deepEqual(main.sets.map((s) => s.weight), [120, 150, 180, 225, 255, 285]);
+  assert.equal(main.sets.filter((s) => s.kind === 'warmup').length, 3);
+  assert.equal(main.sets.at(-1).amrap, true);
+  const supp = entries[1];
+  assert.equal(supp.role, 'supplemental');
+  assert.equal(supp.sets.length, 5);
+  assert.equal(supp.sets[0].weight, 225);
+  assert.equal(entries[2].sets.length, 3);
+  assert.equal(entries[2].sets[0].weight, 20);
+  assert.equal(entries[2].sets[0].targetReps, 12);
+
+  const deload = core.buildSession({ template, exercises, settings, weekIndex: 3 });
+  assert.equal(deload.entries.filter((e) => e.role === 'supplemental').length, 0);
+  const bbb = core.buildSession({ template: { ...template, supplemental: { type: 'bbb', sets: 5, reps: 10, pct: 0.5 } }, exercises, settings, weekIndex: 0 });
+  assert.equal(bbb.entries[1].sets[0].weight, 150);
+});
+
+const wk = (id, date, sets, extra = {}) => ({ id, date, entries: [{ exerciseId: 'sq', name: 'Squat', role: 'main', sets }], ...extra });
+
+test('e1RM history, best and PR detection', () => {
+  const w1 = wk('a', '2026-01-01', [{ kind: 'main', done: true, weight: 200, reps: 5 }, { kind: 'warmup', done: true, weight: 250, reps: 5 }]);
+  const w2 = wk('b', '2026-01-08', [{ kind: 'main', done: true, weight: 210, reps: 5 }, { kind: 'main', done: false, weight: 400, reps: 5 }]);
+  const hist = core.e1rmHistory([w2, w1], 'sq');
+  assert.deepEqual(hist.map((h) => h.workoutId), ['a', 'b']);
+  assert.equal(hist[0].e1rm, core.e1rm(200, 5)); // warmup ignored
+  assert.equal(core.bestE1rm([w1, w2], 'sq'), core.e1rm(210, 5));
+  const prs = core.findPRs(w2, [w1, w2]);
+  assert.equal(prs.length, 1);
+  assert.equal(core.findPRs(w1, [w1]).length, 0); // first ever isn't a PR
+  const recs = core.repRecords([w1, w2], 'sq');
+  assert.equal(recs[5].weight, 210);
+  assert.equal(recs[1], undefined);
+});
+
+test('next training max suggestion', () => {
+  const ex = { id: 'sq', tm: 300, increment: 10 };
+  const ok = [wk('a', '2026-01-01', [{ kind: 'main', amrap: true, pct: 0.95, done: true, weight: 285, reps: 3, targetReps: 1 }], { cycle: 1 })];
+  assert.equal(core.suggestNextTm(ex, ok, 1).tm, 310);
+  const miss = [wk('a', '2026-01-01', [{ kind: 'main', amrap: true, pct: 0.95, done: true, weight: 285, reps: 0, targetReps: 1 }], { cycle: 1 })];
+  assert.equal(core.suggestNextTm(ex, miss, 1).tm, 270);
+  assert.equal(core.suggestNextTm(ex, [], 1).tm, 310);
+});
+
+test('month grid is Monday-first and complete', () => {
+  const g = core.monthGrid(2026, 10); // November 2026 starts on a Sunday
+  assert.equal(g[0].filter(Boolean).length, 1);
+  assert.equal(g[0][6], '2026-11-01');
+  assert.equal(g.flat().filter(Boolean).length, 30);
+});
+
+test('unit conversion', () => {
+  const state = { exercises: [{ tm: 225, increment: 10 }], workouts: [wk('a', '2026-01-01', [{ weight: 100 }])], activeWorkout: null, tmHistory: [] };
+  core.convertWeights(state, 1 / core.LB_PER_KG, 2.5);
+  assert.equal(state.exercises[0].tm, 102);
+  assert.equal(state.exercises[0].increment, 5);
+  assert.equal(state.workouts[0].entries[0].sets[0].weight, 45.5);
+});
