@@ -127,3 +127,46 @@ test('any exercise with a TM gets 5/3/1 sets, honoring its own rounding', () => 
   assert.equal(entries[0].sets.at(-1).amrap, true);
   assert.equal(entries[1].sets[0].weight, 20);
 });
+
+test('targets to beat last time', () => {
+  assert.equal(core.targetReps(50, { weight: 50, reps: 10 }), 11);
+  assert.equal(core.targetReps(null, { weight: null, reps: 12 }), 13); // bodyweight
+  // heavier: 50x10 epley = 66.67; at 55 need 55*(1+r/30) > 66.67 -> r > 6.36 -> 7
+  assert.equal(core.targetReps(55, { weight: 50, reps: 10 }), 7);
+  assert.equal(core.targetReps(50, null), null);
+  assert.equal(core.compareToPrev({ weight: 50, reps: 11 }, { weight: 50, reps: 10 }), 1);
+  assert.equal(core.compareToPrev({ weight: 50, reps: 10 }, { weight: 50, reps: 10 }), 0);
+  assert.equal(core.compareToPrev({ weight: 55, reps: 6 }, { weight: 50, reps: 10 }), -1);
+});
+
+test('accessory sets: repeat last, scheme with targets, drops', () => {
+  const last = { sets: [{ kind: 'accessory', weight: 40, reps: 10, done: true }, { kind: 'accessory', weight: 40, reps: 8, done: true }, { kind: 'accessory', weight: 30, reps: 8, style: 'drop', done: true }] };
+  const rep = core.accessorySets({ last, repeatLast: true });
+  assert.deepEqual(rep.map((s) => [s.weight, s.targetReps, s.style]), [[40, 10, undefined], [40, 8, undefined], [30, 8, 'drop']]);
+  assert.deepEqual(rep[1].prev, { weight: 40, reps: 8 });
+  const sch = core.accessorySets({ last, sets: 3, reps: 12, drops: 2, rounding: 2.5 });
+  assert.deepEqual(sch.map((s) => s.weight), [40, 40, 40, 32.5, 25]);
+  assert.deepEqual(sch.map((s) => s.style), [undefined, undefined, undefined, 'drop', 'drop']);
+  assert.equal(sch[2].prev, null);
+  assert.equal(core.accessorySets({ last: null, repeatLast: true, sets: 2, reps: 5 }).length, 2);
+});
+
+test('supersets and giant sets stay contiguous', () => {
+  const es = [{ groupId: 'a' }, { groupId: 'a' }, {}, { groupId: 'a' }, { groupId: 'b' }, { groupId: 'b' }, { groupId: 'b' }];
+  core.normalizeGroups(es);
+  assert.equal(es[0].groupId, es[1].groupId);
+  assert.equal(es[3].groupId, undefined);
+  const info = core.groupInfo(es);
+  assert.deepEqual(info.map((g) => g && `${g.letter}${g.pos + 1}/${g.type}`), ['A1/Superset', 'A2/Superset', null, null, 'B1/Giant set', 'B2/Giant set', 'B3/Giant set']);
+});
+
+test('templates build supersets, drop sets; drops excluded from e1RM', () => {
+  const exercises = [{ id: 'c', name: 'Curl' }, { id: 'p', name: 'Pushdown' }, { id: 'r', name: 'Raise' }];
+  const template = { accessories: [{ exerciseId: 'c', sets: 3, reps: 10, linkNext: true }, { exerciseId: 'p', sets: 3, reps: 12, drops: 1 }, { exerciseId: 'r', sets: 2, reps: 15 }] };
+  const { entries } = core.buildSession({ template, exercises, settings: { rounding: 2.5 }, weekIndex: 0 });
+  assert.ok(entries[0].groupId && entries[0].groupId === entries[1].groupId);
+  assert.equal(entries[2].groupId, undefined);
+  assert.equal(entries[1].sets.at(-1).style, 'drop');
+  const w = { id: 'w', date: '2026-01-01', entries: [{ exerciseId: 'c', sets: [{ done: true, weight: 20, reps: 10 }, { done: true, weight: 40, reps: 10, style: 'drop' }] }] };
+  assert.equal(core.bestE1rm([w], 'c'), core.e1rm(20, 10));
+});

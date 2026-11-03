@@ -230,16 +230,29 @@ function currentWorkout() {
   return arg === 'active' ? S.activeWorkout : S.workouts.find((w) => w.id === arg) || null;
 }
 
-function setLabel(entry, s, si) {
+function setLabel(entry, s) {
   if (s.kind === 'warmup') return 'W';
-  const same = entry.sets.filter((x) => x.kind === s.kind);
+  if (s.style === 'drop') return 'D';
+  const same = entry.sets.filter((x) => x.kind === s.kind && x.style !== 'drop');
   return String(same.indexOf(s) + 1);
 }
+const canRestyle = (entry, s) => s.kind !== 'warmup' && !s.amrap && entry.role !== 'main';
 
 function setMeta(w, entry, s) {
   const parts = [];
   const firstOfWeight = entry.sets.find((x) => x.weight === s.weight) === s;
   if ((entry.role === 'main' || (entry.role === 'supplemental' && firstOfWeight)) && s.weight > 0 && usesPlates(entry.name)) parts.push(`<span>${plateText(s.weight)}</span>`);
+  if (s.prev && !s.amrap && s.prev.reps > 0) {
+    const f = S.settings.formula;
+    const last = `Last ${s.prev.weight > 0 ? `${wt(s.prev.weight)}×` : ''}${s.prev.reps}`;
+    const cmp = core.compareToPrev(s, s.prev, f);
+    if (cmp === null) {
+      const t = core.targetReps(s.weight, s.prev, f);
+      parts.push(`<span>${last}</span><span class="hint">${t ? `Target ${t}+ reps` : 'Lighter than last time'}</span>`);
+    } else {
+      parts.push(`<span>${last}</span><span class="${cmp > 0 ? 'pr' : cmp < 0 ? 'down' : ''}">${cmp > 0 ? '▲ Beat it' : cmp < 0 ? '▼ Below last time' : '= Matched'}</span>`);
+    }
+  }
   if (s.amrap && s.weight > 0) {
     const f = S.settings.formula;
     const best = core.bestE1rm(S.workouts, entry.exerciseId, f, w.id);
@@ -284,16 +297,21 @@ function viewWorkout(w, mode) {
       <a class="btn block" href="#/today">Done</a></section>`;
   }
 
+  const groups = core.groupInfo(w.entries);
   w.entries.forEach((e, ei) => {
+    const g = groups[ei];
+    if (g && g.pos === 0) h += `<div class="ss-group"><div class="ss-label">${g.type} ${g.letter} · ${g.size} exercises — one set of each, then rest</div>`;
     h += `<section class="card entry">
       <div class="entry-head">
-        <div><h3>${esc(e.name)}</h3><div class="muted small">${entrySubtitle(e)}</div></div>
+        <div><h3>${g ? `<span class="ss-tag">${g.letter}${g.pos + 1}</span>` : ''}${esc(e.name)}</h3><div class="muted small">${entrySubtitle(e)}</div></div>
         <span class="badge ${e.role}">${e.role === 'main' ? 'Main' : e.role === 'supplemental' ? 'Supp' : 'Acc'}</span>
       </div>
       <div class="set head"><span>Set</span><span>${unit()}</span><span></span><span>Reps</span><span></span></div>
       ${e.sets.map((s, si) => `
-        <div class="set ${s.done ? 'done' : ''} ${s.kind}">
-          <span class="set-label"><b>${setLabel(e, s, si)}</b>${s.pct ? `<i>${pct(s.pct)}</i>` : ''}</span>
+        <div class="set ${s.done ? 'done' : ''} ${s.kind} ${s.style === 'drop' ? 'drop' : ''}">
+          ${canRestyle(e, s)
+            ? `<button class="set-label" data-action="toggle-style" data-e="${ei}" data-s="${si}" aria-label="Set type: ${s.style === 'drop' ? 'drop set' : 'straight set'} (tap to change)"><b>${setLabel(e, s)}</b><i>${s.style === 'drop' ? 'drop' : s.pct ? pct(s.pct) : ''}</i></button>`
+            : `<span class="set-label"><b>${setLabel(e, s)}</b>${s.pct ? `<i>${pct(s.pct)}</i>` : ''}</span>`}
           <input type="text" inputmode="decimal" aria-label="Weight" data-e="${ei}" data-s="${si}" data-field="weight" value="${s.weight ?? ''}" placeholder="—">
           <span class="x">×</span>
           <input type="text" inputmode="numeric" aria-label="Reps" class="${s.amrap ? 'amrap' : ''}" data-e="${ei}" data-s="${si}" data-field="reps" value="${s.reps ?? ''}" placeholder="${s.targetReps ?? ''}${s.amrap ? '+' : ''}">
@@ -302,10 +320,12 @@ function viewWorkout(w, mode) {
         <div class="set-meta" id="meta-${ei}-${si}">${setMeta(w, e, s)}</div>`).join('')}
       <div class="entry-foot">
         <button class="link" data-action="add-set" data-e="${ei}">+ Set</button>
+        <button class="link" data-action="add-drop" data-e="${ei}" ${e.sets.length ? '' : 'disabled'}>+ Drop</button>
         <button class="link" data-action="remove-set" data-e="${ei}" ${e.sets.length ? '' : 'disabled'}>− Set</button>
-        <button class="link danger" data-action="remove-entry" data-e="${ei}">Remove</button>
+        <button class="link more" data-action="entry-menu" data-e="${ei}" aria-label="More options for ${esc(e.name)}">More ⋯</button>
       </div>
     </section>`;
+    if (g && g.pos === g.size - 1) h += '</div>';
   });
 
   h += `<button class="btn block ghost" data-action="pick-exercise">+ Add exercise</button>
@@ -347,11 +367,16 @@ function discardWorkout(skipConfirm) {
   go('#/today');
 }
 
-function addEntry(exerciseId, as531 = false) {
+/**
+ * Add an exercise to the current workout.
+ * spec: { how: '531' | 'last' | 'scheme', sets, reps, drops, link }
+ */
+function addEntry(exerciseId, spec = { how: 'scheme', sets: 3, reps: 10 }) {
   const w = currentWorkout();
   const ex = exById(exerciseId);
   if (!w || !ex) return;
-  if (as531) {
+  let entry;
+  if (spec.how === '531') {
     if (!(ex.tm > 0)) {
       const v = num(prompt(`Training max for ${ex.name} (${unit()})?`, ''));
       if (!(v > 0)) { toast('A training max is needed for 5/3/1 sets'); return; }
@@ -360,19 +385,66 @@ function addEntry(exerciseId, as531 = false) {
     ex.category = 'main';
     const ws = weeks();
     const week = ws[Math.min(Math.max((w.week ?? S.cycle.week) - 1, 0), ws.length - 1)];
-    w.entries.push({ id: core.uid(), exerciseId: ex.id, name: ex.name, role: 'main', tm: ex.tm, sets: core.mainSets(ex, week, S.settings) });
+    entry = { id: core.uid(), exerciseId: ex.id, name: ex.name, role: 'main', tm: ex.tm, sets: core.mainSets(ex, week, S.settings) };
   } else {
-    const last = core.lastPerformance(S.workouts, ex.id);
-    const weight = last?.sets[0]?.weight ?? null;
-    const reps = last?.sets[0]?.reps ?? 10;
-    w.entries.push({
-      id: core.uid(), exerciseId: ex.id, name: ex.name, role: 'accessory', tm: ex.tm ?? null,
-      sets: Array.from({ length: 3 }, () => ({ kind: 'accessory', pct: null, weight, targetReps: reps, reps: null, amrap: false, done: false })),
-    });
+    const last = core.lastPerformance(S.workouts.filter((x) => x.id !== w.id), ex.id);
+    const sets = core.accessorySets({ last, repeatLast: spec.how === 'last', sets: spec.sets, reps: spec.reps, drops: spec.drops, rounding: ex.rounding || S.settings.rounding });
+    entry = { id: core.uid(), exerciseId: ex.id, name: ex.name, role: 'accessory', tm: ex.tm ?? null, sets };
   }
+  const prev = w.entries.at(-1);
+  if (spec.link && prev) entry.groupId = prev.groupId ||= core.uid();
+  w.entries.push(entry);
+  core.normalizeGroups(w.entries);
   persist();
   closeSheet();
   render();
+}
+
+const setsSummary = (sets) => sets.map((s) => `${s.style === 'drop' ? '↘' : ''}${s.weight > 0 ? `${wt(s.weight)}×` : ''}${s.reps ?? '?'}`).join(' · ');
+
+/** Step 2 after picking an exercise: how to add it (last time, a scheme, 5/3/1, drops, superset). */
+function openAddOptions(exId) {
+  const ex = exById(exId);
+  const { mode } = ui.pick;
+  ui.addFor = exId;
+  const inWorkout = mode === 'workout';
+  const w = inWorkout ? currentWorkout() : null;
+  const last = core.lastPerformance(S.workouts.filter((x) => x.id !== w?.id), exId);
+  const lastSets = last?.sets.filter((s) => s.kind !== 'warmup') || [];
+  const prevName = inWorkout ? w.entries.at(-1)?.name : exById(ui.draft?.accessories.at(-1)?.exerciseId)?.name;
+  const lastStraight = lastSets.find((s) => s.style !== 'drop');
+  openSheet(`
+    <div class="sheet-head"><h2>${esc(ex.name)}</h2><button class="link" data-action="close-sheet">Close</button></div>
+    ${lastSets.length ? `<button class="option-card" data-action="add-with" data-how="last">
+        <span class="eyebrow">Repeat last time · ${dateFmt(last.date, { month: 'short', day: 'numeric' })}</span>
+        <strong class="mono">${setsSummary(lastSets)}</strong>
+        <span class="muted small">Same sets, weights and reps — each set shows the target to beat it.</span></button>`
+      : '<p class="muted small">No history for this exercise yet — pick a scheme to start.</p>'}
+    <div class="group-title">Sets × reps${lastStraight?.weight > 0 ? ` <span class="muted">· starts at ${wt(lastStraight.weight)} ${unit()}</span>` : ''}</div>
+    <div class="scheme-grid">${core.SCHEMES.map(([n, r]) => `<button class="chip" data-action="add-with" data-how="scheme" data-sets="${n}" data-reps="${r}">${n}×${r}</button>`).join('')}</div>
+    <div class="row-field custom-scheme">
+      <input type="text" inputmode="numeric" aria-label="Sets" placeholder="Sets" data-addopt="sets"><span class="x">×</span>
+      <input type="text" inputmode="numeric" aria-label="Reps" placeholder="Reps" data-addopt="reps">
+      <button class="btn small" data-action="add-with" data-how="custom">Add</button>
+    </div>
+    <div class="setting"><div><span>Drop sets after the last set</span><small>Each ~20% lighter, no rest in between</small></div>
+      <select data-addopt="drops">${[0, 1, 2, 3].map((n) => `<option value="${n}">${n}</option>`).join('')}</select></div>
+    ${prevName ? `<div class="setting"><div><span>Superset with ${esc(prevName)}</span><small>Alternate sets, rest after the round</small></div>
+      <input type="checkbox" class="switch" data-addopt="link"></div>` : ''}
+    ${inWorkout ? `<button class="btn block ghost" data-action="add-with" data-how="531">5/3/1 sets${ex.tm > 0 ? ` · TM ${wt(ex.tm)} ${unit()}` : ' — asks for a training max'}</button>` : ''}
+    <button class="link" data-action="back-to-picker">‹ Choose a different exercise</button>`);
+}
+
+function readAddOptions(el) {
+  const q = (k) => sheet.querySelector(`[data-addopt="${k}"]`);
+  const how = el.dataset.how;
+  const spec = { how: how === 'custom' ? 'scheme' : how, drops: Number(q('drops')?.value || 0), link: !!q('link')?.checked };
+  if (how === 'scheme') { spec.sets = Number(el.dataset.sets); spec.reps = Number(el.dataset.reps); }
+  if (how === 'custom') {
+    spec.sets = Math.round(num(q('sets').value)); spec.reps = Math.round(num(q('reps').value));
+    if (!(spec.sets > 0 && spec.reps > 0)) { toast('Enter sets and reps'); return null; }
+  }
+  return spec;
 }
 
 const PICK_TITLES = { workout: 'Add exercise', main: 'Choose main lift', supp: 'Supplemental lift', acc: 'Choose accessory', 'acc-new': 'Add accessory' };
@@ -380,7 +452,6 @@ const PICK_TITLES = { workout: 'Add exercise', main: 'Choose main lift', supp: '
 /** One searchable exercise picker used everywhere. `mode` decides what a pick does (see applyPick). */
 function openPicker(mode, i = null) {
   ui.pick = { mode, i };
-  ui.pickAs ||= 'acc';
   const basics = S.exercises.filter(isBasic).sort((a, b) => basicRank(a) - basicRank(b));
   const yourMain = mainLifts().filter((e) => !isBasic(e));
   const shown = new Set([...basics, ...yourMain].map((e) => e.id));
@@ -392,9 +463,6 @@ function openPicker(mode, i = null) {
     ...byGroup(S.exercises.filter((e) => !shown.has(e.id))),
   ];
   const lead = {
-    workout: `<div class="segmented" role="group" aria-label="Add as">
-      <button class="${ui.pickAs === 'acc' ? 'active' : ''}" data-action="pick-as" data-as="acc">Accessory sets</button>
-      <button class="${ui.pickAs === '531' ? 'active' : ''}" data-action="pick-as" data-as="531">5/3/1 sets</button></div>`,
     main: '<button class="pick special" data-action="pick" data-id="">None (accessories only)</button>',
     supp: '<button class="pick special" data-action="pick" data-id="">Same as main lift</button>',
   }[mode] || '';
@@ -412,18 +480,24 @@ function openPicker(mode, i = null) {
 
 function applyPick(id) {
   const { mode, i } = ui.pick || {};
-  if (mode === 'workout') { if (id) addEntry(id, ui.pickAs === '531'); return; }
+  if ((mode === 'workout' || mode === 'acc-new') && id) { openAddOptions(id); return; }
   const d = ui.draft;
   if (!d) return;
   if (mode === 'main') { d.mainLiftId = id; delete d._tm; }
   else if (mode === 'supp') { d.supplemental.liftId = id; delete d._suppTm; }
   else if (mode === 'acc' && id) d.accessories[i].exerciseId = id;
-  else if (mode === 'acc-new' && id) d.accessories.push({ exerciseId: id, sets: 3, reps: 10 });
   closeSheet();
   render();
 }
 
 // ---------- History ----------
+function workoutTags(w) {
+  const g = core.groupInfo(w.entries).filter((x) => x && x.pos === 0);
+  const ss = g.filter((x) => x.type === 'Superset').length, gs = g.length - ss;
+  const drops = w.entries.flatMap((e) => e.sets).filter((s) => s.done && s.style === 'drop').length;
+  return [ss && `${ss} superset${ss > 1 ? 's' : ''}`, gs && `${gs} giant set${gs > 1 ? 's' : ''}`, drops && `${drops} drop set${drops > 1 ? 's' : ''}`].filter(Boolean).join(' · ');
+}
+
 function workoutCard(w) {
   const main = w.entries.find((e) => e.role === 'main') || w.entries[0];
   let best = '';
@@ -432,11 +506,12 @@ function workoutCard(w) {
     if (p) best = `${esc(main.name)} ${wt(p.weight)}×${p.reps} · e1RM ${wt(Math.round(p.e1rm))}`;
   }
   const sets = w.entries.flatMap((e) => e.sets).filter((s) => s.done).length;
+  const tags = workoutTags(w);
   return `<a class="card workout-card" href="#/workout/${w.id}">
     <div class="wc-date"><b>${core.parseIsoDate(w.date).getDate()}</b><span>${dateFmt(w.date, { weekday: 'short' })}</span></div>
     <div class="wc-body"><strong>${esc(w.name)}</strong>
       <div class="muted small">${w.templateId ? `C${w.cycle} · ${esc(w.weekLabel || '')} · ` : ''}${sets} sets · ${wt(Math.round(core.workoutVolume(w)))} ${unit()}</div>
-      ${best ? `<div class="small mono">${best}</div>` : ''}</div>
+      ${best ? `<div class="small mono">${best}</div>` : ''}${tags ? `<div class="small muted">${tags}</div>` : ''}</div>
     <span class="chev">›</span></a>`;
 }
 
@@ -574,7 +649,7 @@ function viewProgram() {
     S.templates.forEach((t, i) => {
       const lift = exById(t.mainLiftId);
       h += `<div class="card row-card">
-        <a href="#/session/${t.id}" class="grow"><div class="eyebrow">Day ${i + 1}</div><strong>${esc(t.name)}</strong><div class="muted small">Main: ${esc(lift?.name || 'none')}${lift ? ` (TM ${wt(lift.tm)} ${unit()})` : ''} · ${esc(core.SUPPLEMENTAL_TYPES[t.supplemental?.type || 'none']?.label.replace(/ \(.*\)/, '') || '')} · ${(t.accessories || []).length} accessories</div></a>
+        <a href="#/session/${t.id}" class="grow"><div class="eyebrow">Day ${i + 1}</div><strong>${esc(t.name)}</strong><div class="muted small">Main: ${esc(lift?.name || 'none')}${lift ? ` (TM ${wt(lift.tm)} ${unit()})` : ''} · ${esc(core.SUPPLEMENTAL_TYPES[t.supplemental?.type || 'none']?.label.replace(/ \(.*\)/, '') || '')} · ${(t.accessories || []).length} accessories${(t.accessories || []).some((a) => a.linkNext) ? ' · supersets' : ''}</div></a>
         <button class="icon-btn" data-action="move-session" data-i="${i}" data-delta="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
         <button class="icon-btn" data-action="move-session" data-i="${i}" data-delta="1" ${i === S.templates.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
       </div>`;
@@ -668,12 +743,17 @@ function viewSession(id) {
       </div>`;
   }
   h += `</section><section class="card"><h2>Accessories</h2>
-    ${(d.accessories || []).map((a, i) => `<div class="acc-row">
+    ${(d.accessories || []).map((a, i) => `<div class="acc-row ${a.linkNext ? 'linked' : ''} ${i > 0 && d.accessories[i - 1].linkNext ? 'linked-prev' : ''}">
       <button class="select-btn" data-action="open-picker" data-mode="acc" data-i="${i}">${esc(exById(a.exerciseId)?.name || 'Choose…')}</button>
       <input type="text" inputmode="numeric" aria-label="Sets" data-draft="accessories.${i}.sets" data-num value="${a.sets}"><span class="x">×</span>
       <input type="text" inputmode="numeric" aria-label="Reps" data-draft="accessories.${i}.reps" data-num value="${a.reps}">
       <button class="icon-btn" data-action="acc-move" data-i="${i}" data-delta="-1" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
-      <button class="icon-btn danger" data-action="acc-remove" data-i="${i}" aria-label="Remove">×</button></div>`).join('') || '<p class="muted small">No accessories yet.</p>'}
+      <button class="icon-btn danger" data-action="acc-remove" data-i="${i}" aria-label="Remove">×</button>
+      <div class="acc-opts">
+        <button class="chip ${a.repeatLast ? 'active' : ''}" data-action="acc-toggle" data-i="${i}" data-key="repeatLast" aria-pressed="${!!a.repeatLast}">↻ Repeat last time</button>
+        <button class="chip ${a.drops ? 'active' : ''}" data-action="acc-drops" data-i="${i}">↘ ${a.drops || 0} drop${a.drops === 1 ? '' : 's'}</button>
+        ${i < d.accessories.length - 1 ? `<button class="chip ${a.linkNext ? 'active' : ''}" data-action="acc-toggle" data-i="${i}" data-key="linkNext" aria-pressed="${!!a.linkNext}">⛓ Superset with next</button>` : ''}
+      </div></div>`).join('') || '<p class="muted small">No accessories yet.</p>'}
     <button class="link" data-action="acc-add">+ Add accessory</button></section>
     <div class="actions">${existing ? '<button class="btn danger-ghost" data-action="delete-session">Delete</button>' : ''}
       <button class="btn primary grow" data-action="save-session">Save training day</button></div>`;
@@ -838,11 +918,13 @@ async function shareOrDownload(text, name, type) {
 
 function csv() {
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = [['date', 'workout', 'cycle', 'week', 'exercise', 'role', 'set_type', 'percent_tm', 'weight', 'unit', 'target_reps', 'reps', 'amrap', 'done', 'e1rm']];
+  const rows = [['date', 'workout', 'cycle', 'week', 'exercise', 'role', 'set_type', 'percent_tm', 'weight', 'unit', 'target_reps', 'reps', 'amrap', 'done', 'e1rm', 'set_style', 'group']];
   for (const w of sortByDateDesc(S.workouts).reverse()) {
-    for (const e of w.entries) {
+    const gi = core.groupInfo(w.entries);
+    for (const [ei, e] of w.entries.entries()) {
+      const g = gi[ei];
       for (const s of e.sets) {
-        rows.push([w.date, w.name, w.templateId ? w.cycle : '', w.templateId ? w.weekLabel : '', e.name, e.role, s.kind, s.pct ? Math.round(s.pct * 100) : '', s.weight ?? '', unit(), s.targetReps ?? '', s.reps ?? '', s.amrap ? 1 : 0, s.done ? 1 : 0, s.done ? Math.round(core.e1rm(s.weight, s.reps, S.settings.formula)) || '' : '']);
+        rows.push([w.date, w.name, w.templateId ? w.cycle : '', w.templateId ? w.weekLabel : '', e.name, e.role, s.kind, s.pct ? Math.round(s.pct * 100) : '', s.weight ?? '', unit(), s.targetReps ?? '', s.reps ?? '', s.amrap ? 1 : 0, s.done ? 1 : 0, s.done && s.style !== 'drop' ? Math.round(core.e1rm(s.weight, s.reps, S.settings.formula)) || '' : '', s.style || 'straight', g ? `${g.type} ${g.letter}${g.pos + 1}` : '']);
       }
     }
   }
@@ -954,13 +1036,18 @@ const actions = {
     persist();
     render();
     if (s.done && parseHash()[1] === 'active' && s.kind !== 'warmup') {
-      startRest(e.role === 'main' ? S.settings.restMain : S.settings.restOther);
+      const ei = Number(el.dataset.e), g = core.groupInfo(w.entries)[ei];
+      const nextSet = e.sets[Number(el.dataset.s) + 1];
+      if (nextSet?.style === 'drop') { stopRest(); toast('Drop set — strip the weight and go'); }
+      else if (g && g.pos < g.size - 1) { stopRest(); toast(`Next: ${g.letter}${g.pos + 2} ${w.entries[ei + 1].name}`); }
+      else startRest(e.role === 'main' ? S.settings.restMain : S.settings.restOther);
     }
   },
   'add-set'(el) {
     const e = currentWorkout().entries[el.dataset.e];
     const last = e.sets.at(-1);
-    e.sets.push(last ? { ...last, amrap: false, done: false, reps: null } : { kind: 'accessory', pct: null, weight: null, targetReps: 10, reps: null, amrap: false, done: false });
+    const lastStraight = [...e.sets].reverse().find((x) => x.style !== 'drop') || last;
+    e.sets.push(last ? { ...lastStraight, amrap: false, done: false, reps: null, prev: null, style: undefined } : { kind: 'accessory', pct: null, weight: null, targetReps: 10, reps: null, amrap: false, done: false });
     persist(); render();
   },
   'remove-set'(el) { currentWorkout().entries[el.dataset.e].sets.pop(); persist(); render(); },
@@ -968,14 +1055,76 @@ const actions = {
     const w = currentWorkout();
     if (!confirm(`Remove ${w.entries[el.dataset.e].name} from this workout?`)) return;
     w.entries.splice(Number(el.dataset.e), 1);
-    persist(); render();
+    core.normalizeGroups(w.entries);
+    persist(); closeSheet(); render();
   },
   'pick-exercise'() { openPicker('workout'); },
   'open-picker'(el) { openPicker(el.dataset.mode, el.dataset.i == null ? null : Number(el.dataset.i)); },
   'pick'(el) { applyPick(el.dataset.id || null); },
-  'pick-as'(el) {
-    ui.pickAs = el.dataset.as;
-    sheet.querySelectorAll('[data-action="pick-as"]').forEach((b) => b.classList.toggle('active', b === el));
+  'add-with'(el) {
+    const spec = readAddOptions(el);
+    if (!spec) return;
+    if (ui.pick?.mode === 'workout') { addEntry(ui.addFor, spec); return; }
+    const d = ui.draft;
+    if (!d) return;
+    if (spec.link && d.accessories.length) d.accessories.at(-1).linkNext = true;
+    d.accessories.push({ exerciseId: ui.addFor, sets: spec.sets || 3, reps: spec.reps || 10, repeatLast: spec.how === 'last', drops: spec.drops || 0 });
+    closeSheet(); render();
+  },
+  'back-to-picker'() { openPicker(ui.pick.mode, ui.pick.i); },
+  'toggle-style'(el) {
+    const s = currentWorkout().entries[el.dataset.e].sets[el.dataset.s];
+    if (s.style === 'drop') delete s.style; else s.style = 'drop';
+    persist(); render();
+  },
+  'add-drop'(el) {
+    const e = currentWorkout().entries[el.dataset.e];
+    e.sets.push(core.dropSetAfter(e.sets.at(-1), exById(e.exerciseId)?.rounding || S.settings.rounding));
+    persist(); render();
+  },
+  'entry-menu'(el) {
+    const w = currentWorkout();
+    const i = Number(el.dataset.e);
+    const e = w.entries[i];
+    const g = core.groupInfo(w.entries)[i];
+    const next = w.entries[i + 1];
+    const linkedNext = next && e.groupId && next.groupId === e.groupId;
+    openSheet(`<div class="sheet-head"><h2>${esc(e.name)}</h2><button class="link" data-action="close-sheet">Close</button></div>
+      <div class="menu">
+        ${next && !linkedNext ? `<button data-action="entry-link" data-e="${i}">⛓ Superset with next: ${esc(next.name)}</button>` : ''}
+        ${g ? `<button data-action="entry-unlink" data-e="${i}">Remove from ${g.type.toLowerCase()} ${g.letter}</button>` : ''}
+        ${i > 0 ? `<button data-action="entry-move" data-e="${i}" data-delta="-1">↑ Move up</button>` : ''}
+        ${next ? `<button data-action="entry-move" data-e="${i}" data-delta="1">↓ Move down</button>` : ''}
+        <button class="danger" data-action="remove-entry" data-e="${i}">Remove exercise</button>
+      </div>`);
+  },
+  'entry-link'(el) {
+    const es = currentWorkout().entries, i = Number(el.dataset.e);
+    const a = es[i], b = es[i + 1];
+    const id = a.groupId || b.groupId || core.uid();
+    const old = b.groupId;
+    a.groupId = id;
+    for (const x of es) if (old && x.groupId === old) x.groupId = id;
+    b.groupId = id;
+    core.normalizeGroups(es);
+    persist(); closeSheet(); render();
+  },
+  'entry-unlink'(el) {
+    const es = currentWorkout().entries, i = Number(el.dataset.e);
+    const g = es[i].groupId;
+    delete es[i].groupId;
+    // Entries after the removed one start their own group so groups stay contiguous.
+    const fresh = core.uid();
+    for (let k = i + 1; k < es.length && es[k].groupId === g; k++) es[k].groupId = fresh;
+    core.normalizeGroups(es);
+    persist(); closeSheet(); render();
+  },
+  'entry-move'(el) {
+    const es = currentWorkout().entries, i = Number(el.dataset.e), j = i + Number(el.dataset.delta);
+    if (j < 0 || j >= es.length) return;
+    [es[i], es[j]] = [es[j], es[i]];
+    core.normalizeGroups(es);
+    persist(); closeSheet(); render();
   },
   'close-sheet'() { closeSheet(); },
   'create-and-pick'() {
@@ -1051,6 +1200,8 @@ const actions = {
     persist(); go('#/lifts');
   },
   'acc-add'() { openPicker('acc-new'); },
+  'acc-toggle'(el) { const a = ui.draft.accessories[el.dataset.i]; a[el.dataset.key] = !a[el.dataset.key]; render(); },
+  'acc-drops'(el) { const a = ui.draft.accessories[el.dataset.i]; a.drops = ((a.drops || 0) + 1) % 4; render(); },
   'acc-move'(el) {
     const a = ui.draft.accessories, i = Number(el.dataset.i), j = i + Number(el.dataset.delta);
     if (j < 0 || j >= a.length) return;

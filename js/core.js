@@ -104,7 +104,7 @@ export function uid() {
   return `id-${Date.now().toString(36)}-${(idCounter++).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-const makeSet = (o) => ({ kind: 'work', pct: null, weight: null, targetReps: null, reps: null, amrap: false, done: false, ...o });
+export const makeSet = (o) => ({ kind: 'work', pct: null, weight: null, targetReps: null, reps: null, amrap: false, done: false, ...o });
 
 /**
  * Build the entries for a session (template) in a given week.
@@ -148,14 +148,18 @@ export function buildSession({ template, exercises, settings, weekIndex, history
     }
   }
 
+  let linkFromPrev = null;
   for (const acc of template.accessories || []) {
     const ex = byId[acc.exerciseId];
-    if (!ex) continue;
+    if (!ex) { linkFromPrev = null; continue; }
     const last = lastPerformance(history, ex.id);
-    const lastWeight = last ? (last.sets.find((s) => s.done && s.weight != null) || last.sets[0] || {}).weight ?? null : null;
-    const sets = Array.from({ length: acc.sets || 3 }, () => makeSet({ kind: 'accessory', weight: lastWeight, targetReps: acc.reps || 10 }));
-    entries.push({ id: uid(), exerciseId: ex.id, name: ex.name, role: 'accessory', sets });
+    const sets = accessorySets({ last, repeatLast: acc.repeatLast, sets: acc.sets, reps: acc.reps, drops: acc.drops, rounding: ex.rounding || settings.rounding });
+    const entry = { id: uid(), exerciseId: ex.id, name: ex.name, role: 'accessory', sets };
+    if (linkFromPrev) entry.groupId = linkFromPrev.groupId ||= uid();
+    entries.push(entry);
+    linkFromPrev = acc.linkNext ? entry : null;
   }
+  normalizeGroups(entries);
 
   return { week, entries };
 }
@@ -171,7 +175,7 @@ export function lastPerformance(workouts, exerciseId) {
   return null;
 }
 
-const countable = (s) => s.done && s.kind !== 'warmup' && s.weight > 0 && s.reps > 0 && s.reps <= 15;
+const countable = (s) => s.done && s.kind !== 'warmup' && s.style !== 'drop' && s.weight > 0 && s.reps > 0 && s.reps <= 15;
 
 /** Per-workout best estimated 1RM for an exercise, sorted by date ascending. */
 export function e1rmHistory(workouts, exerciseId, formula = 'epley') {
@@ -204,7 +208,7 @@ export function repRecords(workouts, exerciseId) {
     for (const e of w.entries || []) {
       if (e.exerciseId !== exerciseId) continue;
       for (const s of e.sets) {
-        if (!s.done || s.kind === 'warmup' || !(s.weight > 0) || !(s.reps > 0) || s.reps > 12) continue;
+        if (!s.done || s.kind === 'warmup' || s.style === 'drop' || !(s.weight > 0) || !(s.reps > 0) || s.reps > 12) continue;
         if (!recs[s.reps] || s.weight > recs[s.reps].weight) recs[s.reps] = { weight: s.weight, date: w.date };
       }
     }
@@ -297,4 +301,95 @@ export function convertWeights(state, factor, rounding) {
   }
   for (const h of state.tmHistory || []) h.tm = r(h.tm);
   return state;
+}
+
+// ---------- accessory schemes, last-time targets, drop sets, supersets ----------
+
+export const SCHEMES = [[5, 5], [3, 5], [3, 8], [4, 8], [3, 10], [4, 10], [5, 10], [3, 12], [3, 15], [2, 20]];
+
+/**
+ * Reps needed at `weight` to beat a previous set. Same (or no) weight: one more rep.
+ * Different weight: the fewest reps whose e1RM beats the previous set's.
+ */
+export function targetReps(weight, prev, formula = 'epley') {
+  if (!prev || !(prev.reps > 0)) return null;
+  if (!(weight > 0) || !(prev.weight > 0) || Math.abs(weight - prev.weight) < 1e-9) return prev.reps + 1;
+  return repsToBeat(weight, e1rm(prev.weight, prev.reps, formula), formula);
+}
+
+/** How a logged set compares with the previous one: 1 better, 0 equal, -1 worse. */
+export function compareToPrev(set, prev, formula = 'epley') {
+  if (!prev || !(set.reps > 0)) return null;
+  const same = !(set.weight > 0) || !(prev.weight > 0) || Math.abs(set.weight - prev.weight) < 1e-9;
+  if (same) {
+    const dw = (set.weight || 0) - (prev.weight || 0);
+    return Math.sign(set.reps - prev.reps) || Math.sign(dw);
+  }
+  const a = e1rm(set.weight, set.reps, formula), b = e1rm(prev.weight, prev.reps, formula);
+  return Math.abs(a - b) < 1e-9 ? 0 : Math.sign(a - b);
+}
+
+const prevOf = (s) => (s ? { weight: s.weight ?? null, reps: s.reps ?? null } : null);
+
+/** Sets for an accessory: copied from last time, or a sets×reps scheme with last time's numbers as targets. */
+export function accessorySets({ last, repeatLast, sets: nSets = 3, reps = 10, drops = 0, rounding = 2.5 }) {
+  const prior = (last?.sets || []).filter((s) => s.kind !== 'warmup');
+  let sets;
+  if (repeatLast && prior.length) {
+    sets = prior.map((p) => makeSet({ kind: 'accessory', weight: p.weight ?? null, targetReps: p.reps ?? null, style: p.style, prev: prevOf(p) }));
+  } else {
+    const straight = prior.filter((p) => p.style !== 'drop');
+    const weight = straight[0]?.weight ?? null;
+    sets = Array.from({ length: nSets || 3 }, (_, i) => makeSet({ kind: 'accessory', weight, targetReps: reps || 10, prev: prevOf(straight[i]) }));
+    appendDrops(sets, drops, rounding);
+  }
+  return sets;
+}
+
+/** Add `n` drop sets after the last set, each ~20% lighter than the one before. */
+export function appendDrops(sets, n, rounding = 2.5) {
+  for (let i = 0; i < (n || 0); i++) sets.push(dropSetAfter(sets.at(-1), rounding));
+  return sets;
+}
+
+export function dropSetAfter(prev, rounding = 2.5) {
+  const w = prev?.weight > 0 ? roundTo(prev.weight * 0.8, rounding) : null;
+  return makeSet({ kind: prev?.kind === 'main' || prev?.kind === 'warmup' ? 'accessory' : prev?.kind || 'accessory', weight: w, targetReps: null, style: 'drop' });
+}
+
+/** Keep superset groups contiguous; a lone grouped entry is ungrouped. Mutates entries. */
+export function normalizeGroups(entries) {
+  const seen = new Set();
+  let i = 0;
+  while (i < entries.length) {
+    const g = entries[i].groupId;
+    if (!g) { i++; continue; }
+    let j = i;
+    while (j + 1 < entries.length && entries[j + 1].groupId === g) j++;
+    if (j === i) delete entries[i].groupId;
+    else {
+      const id = seen.has(g) ? uid() : g;
+      seen.add(id);
+      for (let k = i; k <= j; k++) entries[k].groupId = id;
+    }
+    i = j + 1;
+  }
+  return entries;
+}
+
+/** Per-entry group info: null, or { letter, pos (0-based), size, type }. */
+export function groupInfo(entries) {
+  const out = entries.map(() => null);
+  let letter = 0, i = 0;
+  while (i < entries.length) {
+    const g = entries[i].groupId;
+    let j = i;
+    while (g && j + 1 < entries.length && entries[j + 1].groupId === g) j++;
+    if (g && j > i) {
+      const L = String.fromCharCode(65 + (letter++ % 26));
+      for (let k = i; k <= j; k++) out[k] = { letter: L, pos: k - i, size: j - i + 1, type: j - i + 1 >= 3 ? 'Giant set' : 'Superset' };
+    }
+    i = j + 1;
+  }
+  return out;
 }

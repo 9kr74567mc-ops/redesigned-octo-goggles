@@ -12,6 +12,8 @@ An offline-first web app (PWA) for Jim Wendler's 5/3/1. Add it to your iPhone ho
 - **Customizable exercises**: add, rename or delete main lifts and accessories; each main lift has its own TM and per-cycle increment.
 - **Customizable training days**: choose 1–7 days per week; each day has a name, any exercise as its main lift (with its training max), supplemental work, and an ordered accessory list.
 - **Workout logging**: pre-filled weights, tap ✓ to log a set, editable weight/reps, add/remove sets and exercises, plate breakdown for every bar weight, rest timer with sound, workout notes.
+- **Adding exercises**: repeat last time's sets (every set shows the reps needed to beat it), quick schemes (5×5, 3×10, …) or custom sets × reps, optional drop sets, or 5/3/1 sets.
+- **Supersets, giant sets and drop sets**: link exercises (A1/A2/A3) in a workout or a training day; the rest timer waits for the end of the round. Drop sets are tracked separately and excluded from e1RM/PRs.
 - **Estimated 1RM**: Epley, Brzycki, or their average. PR sets show "N reps beats your e1RM PR" live, and you get a PR summary when you finish.
 - **Automatic cycle tracking**: finishing every session advances the week; at cycle end it suggests new TMs (+increment, or −10% if a PR set missed its minimum reps) for you to review.
 - **History and calendar**: month calendar with workout days (deload days in blue), a list view, editable past workouts, and logging workouts for any past date.
