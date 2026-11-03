@@ -21,7 +21,6 @@ test('rounding and training max', () => {
   assert.equal(core.roundTo(187.4, 5), 185);
   assert.equal(core.roundTo(188, 5), 190);
   assert.equal(core.roundTo(101.3, 2.5), 102.5);
-  assert.equal(core.trainingMaxFrom1rm(300, 0.9, 5), 270);
 });
 
 test('e1RM formulas', () => {

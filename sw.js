@@ -1,5 +1,5 @@
 // Offline cache for the app shell. Bump VERSION whenever app files change.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = `wendler-log-${VERSION}`;
 const ASSETS = [
   './', './index.html', './css/app.css', './js/app.js', './js/core.js', './js/store.js',

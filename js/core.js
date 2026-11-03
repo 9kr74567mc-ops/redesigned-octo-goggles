@@ -76,10 +76,6 @@ export function repsToBeat(weight, target, formula = 'epley', maxReps = 30) {
   return null;
 }
 
-export function trainingMaxFrom1rm(oneRm, tmPercent = 0.9, rounding = 5) {
-  return roundTo(oneRm * tmPercent, rounding);
-}
-
 /** Greedy per-side plate breakdown. `remainder` is total weight that couldn't be loaded. */
 export function plateBreakdown(total, bar, plates) {
   if (!(total > 0)) return { perSide: [], remainder: 0, belowBar: false };

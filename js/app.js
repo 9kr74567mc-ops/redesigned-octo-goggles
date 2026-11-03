@@ -115,14 +115,12 @@ function viewToday() {
     h += `<section class="card">
       <h2>Set your training maxes</h2>
       ${unitSwitch()}
-      <p class="muted">Enter a recent or estimated 1-rep max. Your training max is ${Math.round(S.settings.tmPercent * 100)}% of it, rounded to ${wt(S.settings.rounding)} ${unit()}.</p>
+      <p class="muted">Enter the training max for each lift. Every 5/3/1 percentage is taken from this number, rounded to ${wt(S.settings.rounding)} ${unit()}.</p>
       <div class="setup-grid">${missing.map((e) => `
-        <label class="field"><span>${esc(e.name)} 1RM</span>
-          <input type="text" inputmode="decimal" data-setup="${e.id}" placeholder="${unit()}"></label>
-        <span class="setup-tm" id="setup-tm-${e.id}">TM —</span>`).join('')}
+        <label class="field"><span>${esc(e.name)} training max</span>
+          <input type="text" inputmode="decimal" data-setup="${e.id}" placeholder="${unit()}"></label>`).join('')}
       </div>
       <button class="btn primary block" data-action="save-setup">Save training maxes</button>
-      <p class="muted small">Only know a rep max? Use the <a href="#/tools">1RM calculator</a>.</p>
     </section>`;
   }
 
@@ -532,7 +530,6 @@ function viewExercise(id) {
       <option value="accessory" ${d.category !== 'main' ? 'selected' : ''}>Accessory / assistance</option></select></label>`;
   if (d.category === 'main') {
     h += `<label class="field"><span>Training max (${unit()})</span><input type="text" inputmode="decimal" data-draft="tm" data-num value="${d.tm ?? ''}"></label>
-      <div class="row-field"><input type="text" inputmode="decimal" placeholder="1RM → TM" data-onerm><button class="btn small" data-action="tm-from-1rm">Use ${Math.round(S.settings.tmPercent * 100)}%</button></div>
       <label class="field"><span>Increase per cycle (${unit()})</span><input type="text" inputmode="decimal" data-draft="increment" data-num value="${d.increment ?? ''}"></label>`;
   }
   h += `<label class="field"><span>Notes</span><textarea rows="2" data-draft="notes" placeholder="Cues, setup, equipment">${esc(d.notes || '')}</textarea></label></section>`;
@@ -565,8 +562,7 @@ function viewSession(id) {
       <optgroup label="Main lifts">${opt(mainLifts(), d.mainLiftId)}</optgroup>
       <optgroup label="Other exercises (becomes a main lift)">${opt(S.exercises.filter((e) => e.category !== 'main'), d.mainLiftId)}</optgroup>
     </select></label>
-    ${mainLift ? `<label class="field"><span>${esc(mainLift.name)} training max (${unit()})</span><input type="text" inputmode="decimal" data-draft="_tm" data-num value="${d._tm ?? mainLift.tm ?? ''}" placeholder="e.g. ${unit() === 'kg' ? 100 : 225}"></label>
-      <div class="row-field"><input type="text" inputmode="decimal" placeholder="Or enter 1RM (${unit()})" data-onerm><button class="btn small" data-action="session-tm-from-1rm">Use ${Math.round(S.settings.tmPercent * 100)}%</button></div>` : ''}
+    ${mainLift ? `<label class="field"><span>${esc(mainLift.name)} training max (${unit()})</span><input type="text" inputmode="decimal" data-draft="_tm" data-num value="${d._tm ?? mainLift.tm ?? ''}" placeholder="e.g. ${unit() === 'kg' ? 100 : 225}"></label>` : ''}
   </section>
   <section class="card"><h2>Supplemental</h2>
     <label class="field"><span>Template</span><select data-draft="supplemental.type" data-rerender>
@@ -611,7 +607,6 @@ function viewSettings() {
     ${row('Plates available', `<input type="text" class="wide" data-setting="plates" data-type="list" value="${s.plates.join(', ')}">`, 'Per side, comma separated')}
   </section>
   <section class="card"><h2>5/3/1 program</h2>
-    ${row('Training max', `<input type="text" inputmode="decimal" class="narrow" data-setting="tmPercent" data-type="pct" value="${Math.round(s.tmPercent * 100)}">`, '% of 1RM (Wendler: 85–90%)')}
     ${row('Week order', sel('weekOrder', [['531', '5s, 3s, 5/3/1'], ['351', '3s, 5s, 5/3/1']]))}
     ${row('Main sets', sel('mainStyle', [['amrap', 'Classic PR sets (+)'], ['fivespro', "5's PRO (no AMRAP)"]]))}
     ${row('Deload week', tog('deload'), 'Adds week 4 at 40/50/60%')}
@@ -672,7 +667,6 @@ function tool1rm() {
   if (!(w > 0 && r > 0)) return '';
   const e = core.e1rm(w, r, S.settings.formula);
   return `<div class="stats">${Object.entries(core.FORMULAS).map(([k, l]) => `<div class="stat"><span>${l.split(' ')[0]}</span><b>${wt(Math.round(core.e1rm(w, r, k)))}</b></div>`).join('')}</div>
-    <p>Training max at ${Math.round(S.settings.tmPercent * 100)}%: <b>${wt(core.trainingMaxFrom1rm(e, S.settings.tmPercent, S.settings.rounding))} ${unit()}</b></p>
     <table class="table"><thead><tr><th>%</th><th>Weight</th><th>Reps ≈</th></tr></thead><tbody>
     ${[100, 95, 90, 85, 80, 75, 70, 65, 60].map((p) => {
       const pw = core.roundTo((e * p) / 100, S.settings.rounding);
@@ -835,9 +829,9 @@ const actions = {
     document.querySelectorAll('[data-setup]').forEach((el) => {
       const v = num(el.value);
       const ex = exById(el.dataset.setup);
-      if (ex && v > 0) { setTm(ex, core.trainingMaxFrom1rm(v, S.settings.tmPercent, S.settings.rounding)); n++; }
+      if (ex && v > 0) { setTm(ex, v); n++; }
     });
-    if (!n) { toast('Enter at least one 1RM'); return; }
+    if (!n) { toast('Enter at least one training max'); return; }
     persist(); render(); toast('Training maxes saved');
   },
   'next-cycle'() {
@@ -927,12 +921,6 @@ const actions = {
     [S.templates[i], S.templates[j]] = [S.templates[j], S.templates[i]];
     persist(); render();
   },
-  'tm-from-1rm'() {
-    const v = num(document.querySelector('[data-onerm]')?.value);
-    if (!(v > 0)) { toast('Enter a 1RM first'); return; }
-    ui.draft.tm = core.trainingMaxFrom1rm(v, S.settings.tmPercent, S.settings.rounding);
-    render();
-  },
   'save-exercise'() {
     const d = ui.draft;
     d.name = (d.name || '').trim();
@@ -977,12 +965,6 @@ const actions = {
     render();
   },
   'acc-remove'(el) { ui.draft.accessories.splice(Number(el.dataset.i), 1); render(); },
-  'session-tm-from-1rm'() {
-    const v = num(document.querySelector('[data-onerm]')?.value);
-    if (!(v > 0)) { toast('Enter a 1RM first'); return; }
-    ui.draft._tm = core.trainingMaxFrom1rm(v, S.settings.tmPercent, S.settings.rounding);
-    render();
-  },
   'days'(el) {
     if (Number(el.dataset.delta) > 0) {
       if (S.templates.length >= 7) return;
@@ -1066,9 +1048,6 @@ document.addEventListener('input', (ev) => {
     persist();
   } else if (el.dataset.draft && ui.draft) {
     readDraftInput(el);
-  } else if (el.dataset.setup) {
-    const v = num(el.value);
-    document.getElementById(`setup-tm-${el.dataset.setup}`).textContent = v > 0 ? `TM ${wt(core.trainingMaxFrom1rm(v, S.settings.tmPercent, S.settings.rounding))}` : 'TM —';
   } else if (el.dataset.tool) {
     ui.tools[el.dataset.tool] = el.value;
     document.getElementById('tool-plates').innerHTML = toolPlates();

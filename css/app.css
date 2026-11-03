@@ -119,9 +119,8 @@ input.wide { width: 170px; }
 .grid2 { grid-template-columns: 1fr 1fr; }
 .grid3 { grid-template-columns: 1fr 1fr 1fr; }
 .pad { padding: 10px 0; }
-.setup-grid { display: grid; grid-template-columns: 1fr auto; gap: 0 12px; align-items: center; }
+.setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .setup-grid .field { margin-bottom: 8px; }
-.setup-tm { font-weight: 700; font-variant-numeric: tabular-nums; padding-top: 14px; min-width: 70px; text-align: right; }
 
 .setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
 .setting:first-of-type { border-top: 0; }

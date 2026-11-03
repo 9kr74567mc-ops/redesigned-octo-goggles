@@ -14,7 +14,6 @@ export function defaultSettings(unit = DEFAULT_UNIT) {
   return {
     unit,
     rounding: u.rounding,
-    tmPercent: 0.9,
     weekOrder: '531',      // '531' or '351'
     mainStyle: 'amrap',    // 'amrap' (classic PR sets) or 'fivespro'
     deload: true,
@@ -72,6 +71,7 @@ export function normalize(raw) {
   };
   for (const k of ['exercises', 'templates', 'workouts', 'tmHistory']) if (!Array.isArray(s[k])) s[k] = k === 'exercises' || k === 'templates' ? base[k] : [];
   if (!Array.isArray(s.cycle.done)) s.cycle.done = [];
+  delete s.settings.tmPercent; // training maxes are entered directly
   const weeks = getWeeks(s.settings).length;
   s.cycle.week = Math.min(Math.max(1, s.cycle.week | 0), weeks);
   s.version = SCHEMA_VERSION;
