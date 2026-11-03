@@ -294,3 +294,14 @@ button.set-label b { text-decoration: underline dotted var(--muted); text-underl
 .acc-opts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
 .acc-opts .chip { font-size: 13px; padding: 6px 10px; }
 .acc-row.linked, .acc-row.linked-prev { box-shadow: inset 3px 0 0 var(--tm); padding-left: 10px; }
+
+/* whole-cycle preview */
+.cycle-table { font-size: 14px; margin-bottom: 4px; }
+.cycle-table th, .cycle-table td { padding: 7px 4px; white-space: nowrap; }
+.cycle-table td { font-variant-numeric: tabular-nums; font-weight: 600; }
+.cycle-table td small { font-weight: 400; color: var(--muted); font-size: 11px; }
+.cycle-table td:first-child small { display: block; }
+.cycle-table td.supp { font-weight: 500; font-size: 12px; }
+.cycle-table tr.current td { background: var(--accent-soft); }
+.cycle-table tr.current td:first-child { border-radius: 8px 0 0 8px; }
+.cycle-table tr.current td:last-child { border-radius: 0 8px 8px 0; }

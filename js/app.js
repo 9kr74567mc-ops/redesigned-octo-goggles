@@ -691,20 +691,48 @@ function viewExercise(id) {
       </div>`;
   }
   h += `<label class="field"><span>Notes</span><textarea rows="2" data-draft="notes" placeholder="Cues, setup, equipment">${esc(d.notes || '')}</textarea></label></section>`;
-  if (d.category === 'main' && d.tm > 0) {
-    h += `<section class="card"><h2>This cycle</h2><table class="table"><thead><tr><th>Week</th><th>Set 1</th><th>Set 2</th><th>Set 3</th></tr></thead><tbody>
-      ${weeks().map((wk) => `<tr><td>${esc(wk.label)}</td>${wk.sets.map((s) => `<td>${wt(core.liftWeight(d, s.pct, S.settings))}×${s.reps}${s.amrap ? '+' : ''}</td>`).join('')}</tr>`).join('')}
-    </tbody></table></section>`;
-  }
+  if (d.category === 'main') h += `<section class="card"><h2>This cycle</h2><div id="ex-preview">${cycleTable(d, d.tm)}</div></section>`;
   h += `<div class="actions">${existing ? '<button class="btn danger-ghost" data-action="delete-exercise">Delete</button>' : ''}
     <button class="btn primary grow" data-action="save-exercise">Save</button></div>`;
   if (existing) h += `<a class="btn block ghost" href="#/progress/${existing.id}">View progress</a>`;
   return h;
 }
 
-function tmPreview(lift, tm) {
-  const week = weeks()[S.cycle.week - 1];
-  return tm > 0 ? `${esc(week.label)}: <span class="mono">${weekPreview({ ...lift, tm }, week)}</span>` : 'Enter a training max to see this week\'s weights.';
+/**
+ * Whole-cycle weights for a lift at `tm`: one row per week (current week highlighted).
+ * `supp` (a template's supplemental config) adds a column; `mainSets: false` shows only that column.
+ */
+function cycleTable(lift, tm, { supp = null, mainSets = true } = {}) {
+  if (!lift) return '';
+  if (!(tm > 0)) return '<p class="muted small">Enter a training max to preview every week\'s weights.</p>';
+  const L = { ...lift, tm };
+  const hasSupp = supp && supp.type && supp.type !== 'none';
+  const def = hasSupp ? core.SUPPLEMENTAL_TYPES[supp.type] || core.SUPPLEMENTAL_TYPES.custom : null;
+  const suppName = hasSupp ? def.label.replace(/.*\((.*)\).*/, '$1').replace(/ of TM/, '') : '';
+  const suppCell = (wk) => {
+    if (wk.deload && !S.settings.deloadSupplemental) return '<span class="muted">—</span>';
+    const p = core.supplementalPct(supp.type, wk, supp.pct ?? def.pct);
+    return `${supp.sets || def.sets}×${supp.reps || def.reps} @ ${wt(core.liftWeight(L, p, S.settings))}`;
+  };
+  const head = `${mainSets ? '<th>Set 1</th><th>Set 2</th><th>Set 3</th>' : ''}${hasSupp ? `<th>${esc(suppName)}</th>` : ''}`;
+  const rows = weeks().map((wk, i) => `<tr class="${i + 1 === S.cycle.week ? 'current' : ''}">
+      <td><b>W${i + 1}</b><small>${esc(wk.key === '531' ? '5/3/1' : wk.key === 'deload' ? 'Deload' : wk.key)}</small></td>
+      ${mainSets ? wk.sets.map((st) => `<td>${wt(core.liftWeight(L, st.pct, S.settings))}<small>×${st.reps}${st.amrap ? '+' : ''}</small></td>`).join('') : ''}
+      ${hasSupp ? `<td class="supp">${suppCell(wk)}</td>` : ''}</tr>`).join('');
+  return `<table class="table cycle-table"><thead><tr><th>Week</th>${head}</tr></thead><tbody>${rows}</tbody></table>
+    <p class="muted small">${unit()} · current week highlighted${lift.rounding > 0 ? ` · rounded to ${wt(lift.rounding)}` : ''}</p>`;
+}
+
+/** Live previews for the training-day editor (main lift table, separate supplemental lift table). */
+function sessionPreviews(d) {
+  const main = exById(d.mainLiftId);
+  const sType = d.supplemental?.type || 'none';
+  const suppLift = sType !== 'none' ? exById(d.supplemental.liftId) : null;
+  const separate = suppLift && suppLift.id !== d.mainLiftId;
+  return {
+    main: main ? cycleTable(main, d._tm ?? main.tm, { supp: separate ? null : d.supplemental }) : '',
+    supp: separate ? cycleTable(suppLift, d._suppTm ?? suppLift.tm, { supp: d.supplemental, mainSets: false }) : '',
+  };
 }
 
 function viewSession(id) {
@@ -718,14 +746,14 @@ function viewSession(id) {
   const mainLift = exById(d.mainLiftId);
   const suppLift = sType !== 'none' ? exById(d.supplemental.liftId) : null;
   const tmField = (lift, key) => `<label class="field"><span>${esc(lift.name)} training max (${unit()})</span><input type="text" inputmode="decimal" data-draft="${key}" data-num value="${d[key] ?? lift.tm ?? ''}" placeholder="e.g. ${unit() === 'kg' ? 100 : 225}"></label>`;
-  const previewTm = mainLift ? (d._tm ?? mainLift.tm) : null;
+  const pv = sessionPreviews(d);
   let h = backHeader(id === 'new' ? 'New training day' : esc(existing.name), '#/lifts/days');
   h += `<section class="card">
     <label class="field"><span>Name</span><input type="text" data-draft="name" value="${esc(d.name)}"></label>
     <div class="field"><span>Main lift (5/3/1 percentages)</span>
       <button class="select-btn" data-action="open-picker" data-mode="main">${mainLift ? esc(mainLift.name) : 'None (accessories only)'}</button></div>
     ${mainLift ? `${tmField(mainLift, '_tm')}
-      <p class="muted small" id="tm-preview">${tmPreview(mainLift, previewTm)}</p>` : ''}
+      <div id="tm-preview">${pv.main}</div>` : ''}
   </section>
   <section class="card"><h2>Supplemental</h2>
     <label class="field"><span>Template</span><select data-draft="supplemental.type" data-rerender>
@@ -733,14 +761,15 @@ function viewSession(id) {
   if (sType !== 'none') {
     const def = core.SUPPLEMENTAL_TYPES[sType];
     h += `<div class="field"><span>Lift</span><button class="select-btn" data-action="open-picker" data-mode="supp">${suppLift ? esc(suppLift.name) : 'Same as main lift'}</button></div>
-      ${suppLift && suppLift.id !== d.mainLiftId ? tmField(suppLift, '_suppTm') : ''}
+      ${suppLift && suppLift.id !== d.mainLiftId ? `${tmField(suppLift, '_suppTm')}<div id="supp-preview">${pv.supp}</div>` : ''}
       <div class="grid3">
         <label class="field"><span>Sets</span><input type="text" inputmode="numeric" data-draft="supplemental.sets" data-num value="${d.supplemental.sets ?? def.sets}"></label>
         <label class="field"><span>Reps</span><input type="text" inputmode="numeric" data-draft="supplemental.reps" data-num value="${d.supplemental.reps ?? def.reps}"></label>
         ${sType === 'bbb' || sType === 'custom'
           ? `<label class="field"><span>% of TM</span><input type="text" inputmode="decimal" data-draft="supplemental.pct" data-pct value="${Math.round((d.supplemental.pct ?? def.pct) * 100)}"></label>`
           : `<div class="field"><span>% of TM</span><div class="muted small pad">${sType === 'ssl' ? 'Second' : 'First'} set %</div></div>`}
-      </div>`;
+      </div>
+      <p class="muted small">${!suppLift || suppLift.id === d.mainLiftId ? 'Supplemental weights are shown in the main lift table above.' : 'Weights for this lift are shown in its table above.'}</p>`;
   }
   h += `</section><section class="card"><h2>Accessories</h2>
     ${(d.accessories || []).map((a, i) => `<div class="acc-row ${a.linkNext ? 'linked' : ''} ${i > 0 && d.accessories[i - 1].linkNext ? 'linked-prev' : ''}">
@@ -991,6 +1020,10 @@ function readDraftInput(el) {
   else if (el.tagName === 'SELECT' && v === '') v = null;
   setPath(ui.draft, el.dataset.draft, v);
   if (el.dataset.draft === 'mainLiftId') delete ui.draft._tm;
+  if (el.dataset.draft === 'supplemental.type') {
+    const def = core.SUPPLEMENTAL_TYPES[v] || {};
+    Object.assign(ui.draft.supplemental, { sets: def.sets ?? null, reps: def.reps ?? null, pct: def.pct ?? null });
+  }
 }
 
 // ---------- actions ----------
@@ -1297,8 +1330,15 @@ document.addEventListener('input', (ev) => {
     persist();
   } else if (el.dataset.draft && ui.draft) {
     readDraftInput(el);
-    const pv = document.getElementById('tm-preview');
-    if (pv && el.dataset.draft === '_tm') pv.innerHTML = tmPreview(exById(ui.draft.mainLiftId), ui.draft._tm);
+    if (parseHash()[0] === 'session') {
+      const pv = sessionPreviews(ui.draft);
+      const a = document.getElementById('tm-preview'), b = document.getElementById('supp-preview');
+      if (a) a.innerHTML = pv.main;
+      if (b) b.innerHTML = pv.supp;
+    } else if (parseHash()[0] === 'exercise') {
+      const a = document.getElementById('ex-preview');
+      if (a) a.innerHTML = cycleTable(ui.draft, ui.draft.tm);
+    }
   } else if (el.dataset.tool) {
     ui.tools[el.dataset.tool] = el.value;
     document.getElementById('tool-plates').innerHTML = toolPlates();
