@@ -1,5 +1,6 @@
 import * as core from './core.js';
 import * as store from './store.js';
+import { GROUPS, OTHER_GROUP, groupOf } from './library.js';
 
 let S = store.load();
 const ui = {
@@ -30,6 +31,25 @@ const pct = (p) => (p == null ? '' : `${Math.round(p * 100)}%`);
 const exById = (id) => S.exercises.find((e) => e.id === id);
 const mainLifts = () => S.exercises.filter((e) => e.category === 'main');
 const weeks = () => core.getWeeks(S.settings);
+const ALIASES = [[/dumbbell/, 'db'], [/barbell/, 'bb'], [/kettlebell/, 'kb'], [/overhead press/, 'ohp'], [/romanian deadlift/, 'rdl'], [/stiff-leg deadlift/, 'sldl'], [/bulgarian split squat/, 'bss'], [/glute-ham raise/, 'ghr'], [/pull-?up|chin-?up/, 'pullup chinup']];
+/** Lowercase search text for an exercise: name, group and common abbreviations. */
+const searchText = (e) => { const n = e.name.toLowerCase(); return [n, n.replace(/-/g, ' '), (e.group || '').toLowerCase(), ...ALIASES.filter(([re]) => re.test(n)).map(([, a]) => a)].join(' '); };
+const matches = (text, q) => q.split(/\s+/).filter(Boolean).every((w) => text.includes(w));
+/** [[group, exercises sorted by name]] in library order. */
+function byGroup(list) {
+  const map = new Map(GROUPS.map((g) => [g, []]));
+  for (const e of list) (map.get(e.group) || map.get(OTHER_GROUP)).push(e);
+  return [...map].filter(([, l]) => l.length).map(([g, l]) => [g, l.sort((a, b) => a.name.localeCompare(b.name))]);
+}
+const groupedOptions = (list, sel) => byGroup(list).map(([g, l]) => `<optgroup label="${esc(g)}">${l.map((e) => `<option value="${e.id}" ${e.id === sel ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</optgroup>`).join('');
+function bestByExercise() {
+  const best = {};
+  for (const w of S.workouts) for (const e of w.entries || []) for (const st of e.sets) {
+    if (!st.done || st.kind === 'warmup' || !(st.weight > 0) || !(st.reps > 0) || st.reps > 15) continue;
+    best[e.exerciseId] = Math.max(best[e.exerciseId] || 0, core.e1rm(st.weight, st.reps, S.settings.formula));
+  }
+  return best;
+}
 const num = (v) => { if (v === '' || v == null) return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
 const dateFmt = (iso, opts = { weekday: 'short', month: 'short', day: 'numeric' }) => core.parseIsoDate(iso).toLocaleDateString(undefined, opts);
 const persist = () => { if (!store.save(S)) toast('Could not save — storage full or blocked'); };
@@ -334,13 +354,15 @@ function addEntry(exerciseId) {
 }
 
 function openExercisePicker() {
-  const groups = [['Main lifts', mainLifts()], ['Accessories', S.exercises.filter((e) => e.category !== 'main')]];
+  const recentIds = [...new Set(sortByDateDesc(S.workouts).flatMap((w) => w.entries.map((e) => e.exerciseId)))].slice(0, 8);
+  const recent = recentIds.map(exById).filter(Boolean);
+  const groups = [...(recent.length ? [['Recent', recent]] : []), ['Main lifts', mainLifts()], ...byGroup(S.exercises.filter((e) => e.category !== 'main'))];
   openSheet(`
     <div class="sheet-head"><h2>Add exercise</h2><button class="link" data-action="close-sheet">Close</button></div>
-    <input type="search" class="search" placeholder="Search" data-filter="picker">
-    <div class="picker">${groups.map(([title, list]) => `
-      <div class="group-title">${title}</div>
-      ${list.map((e) => `<button class="pick" data-action="add-entry" data-id="${e.id}" data-name="${esc(e.name.toLowerCase())}">${esc(e.name)}</button>`).join('')}`).join('')}
+    <input type="search" class="search" placeholder="Search ${S.exercises.length} exercises (e.g. db row, incline)" data-filter="picker">
+    <div class="picker">${groups.map(([title, list]) => `<div class="pick-group">
+      <div class="group-title">${esc(title)}</div>
+      ${list.map((e) => `<button class="pick" data-action="add-entry" data-id="${e.id}" data-name="${esc(searchText(e))}">${esc(e.name)}</button>`).join('')}</div>`).join('')}
     </div>
     <div class="row-field"><input type="text" placeholder="New exercise name" data-newex><button class="btn small" data-action="create-and-add">Create</button></div>`);
 }
@@ -503,14 +525,15 @@ function viewProgram() {
     });
     return h;
   }
-  const row = (e) => {
-    const best = core.bestE1rm(S.workouts, e.id, S.settings.formula);
-    return `<a class="card row-card" href="#/exercise/${e.id}"><div class="grow"><strong>${esc(e.name)}</strong>
-      <div class="muted small">${e.category === 'main' ? `TM ${wt(e.tm)} · ` : ''}${best ? `e1RM ${wt(Math.round(best))}` : 'No history'}</div></div><span class="chev">›</span></a>`;
-  };
-  h += `<div class="group-title">Main 5/3/1 lifts</div>${mainLifts().map(row).join('')}`;
-  h += `<div class="group-title">Accessories</div>${S.exercises.filter((e) => e.category !== 'main').map(row).join('')}`;
-  return h + `<a class="btn block ghost" href="#/exercise/new">+ New exercise</a>`;
+  const bests = bestByExercise();
+  const row = (e) => `<a class="row-card ex-row" href="#/exercise/${e.id}" data-name="${esc(searchText(e))}"><div class="grow"><strong>${esc(e.name)}</strong>
+      <div class="muted small">${e.category === 'main' ? `TM ${wt(e.tm)} · ` : ''}${bests[e.id] ? `e1RM ${wt(Math.round(bests[e.id]))}` : 'No history'}</div></div><span class="chev">›</span></a>`;
+  const group = (title, list, open) => `<details class="card ex-group" data-default="${open ? 'open' : ''}" ${open ? 'open' : ''}>
+      <summary><span>${esc(title)}</span><span class="muted small">${list.length}</span></summary>${list.map(row).join('')}</details>`;
+  h += `<div class="row-field"><input type="search" placeholder="Search ${S.exercises.length} exercises" data-filter="exlist"><a class="btn small" href="#/exercise/new">+ New</a></div>`;
+  h += group('Main 5/3/1 lifts', mainLifts(), true);
+  h += byGroup(S.exercises.filter((e) => e.category !== 'main')).map(([g, l]) => group(g, l, false)).join('');
+  return h;
 }
 
 function ensureDraft(key, make) {
@@ -521,10 +544,11 @@ function ensureDraft(key, make) {
 function viewExercise(id) {
   const existing = exById(id);
   if (id !== 'new' && !existing) return backHeader('Not found', '#/lifts');
-  const d = ensureDraft(`ex:${id}`, () => (existing ? JSON.parse(JSON.stringify(existing)) : { id: core.uid(), name: '', category: 'accessory', tm: null, increment: store.UNIT_DEFAULTS[unit()].upperInc, notes: '' }));
+  const d = ensureDraft(`ex:${id}`, () => (existing ? JSON.parse(JSON.stringify(existing)) : { id: core.uid(), name: '', group: OTHER_GROUP, category: 'accessory', tm: null, increment: store.UNIT_DEFAULTS[unit()].upperInc, notes: '' }));
   let h = backHeader(id === 'new' ? 'New exercise' : esc(existing.name), '#/lifts');
   h += `<section class="card">
     <label class="field"><span>Name</span><input type="text" data-draft="name" value="${esc(d.name)}" placeholder="e.g. Front Squat"></label>
+    <label class="field"><span>Group</span><select data-draft="group">${GROUPS.map((g) => `<option ${g === (d.group || OTHER_GROUP) ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></label>
     <label class="field"><span>Type</span><select data-draft="category" data-rerender>
       <option value="main" ${d.category === 'main' ? 'selected' : ''}>Main lift (5/3/1 percentages)</option>
       <option value="accessory" ${d.category !== 'main' ? 'selected' : ''}>Accessory / assistance</option></select></label>`;
@@ -560,7 +584,7 @@ function viewSession(id) {
     <label class="field"><span>Main lift</span><select data-draft="mainLiftId" data-rerender>
       <option value="" ${!d.mainLiftId ? 'selected' : ''}>None (accessories only)</option>
       <optgroup label="Main lifts">${opt(mainLifts(), d.mainLiftId)}</optgroup>
-      <optgroup label="Other exercises (becomes a main lift)">${opt(S.exercises.filter((e) => e.category !== 'main'), d.mainLiftId)}</optgroup>
+      ${groupedOptions(S.exercises.filter((e) => e.category !== 'main'), d.mainLiftId).replace(/<optgroup label="([^"]*)">/g, '<optgroup label="$1 (becomes a main lift)">')}
     </select></label>
     ${mainLift ? `<label class="field"><span>${esc(mainLift.name)} training max (${unit()})</span><input type="text" inputmode="decimal" data-draft="_tm" data-num value="${d._tm ?? mainLift.tm ?? ''}" placeholder="e.g. ${unit() === 'kg' ? 100 : 225}"></label>` : ''}
   </section>
@@ -580,7 +604,7 @@ function viewSession(id) {
   }
   h += `</section><section class="card"><h2>Accessories</h2>
     ${(d.accessories || []).map((a, i) => `<div class="acc-row">
-      <select data-draft="accessories.${i}.exerciseId">${opt(S.exercises, a.exerciseId)}</select>
+      <select data-draft="accessories.${i}.exerciseId"><optgroup label="Main lifts">${opt(mainLifts(), a.exerciseId)}</optgroup>${groupedOptions(S.exercises.filter((e) => e.category !== 'main'), a.exerciseId)}</select>
       <input type="text" inputmode="numeric" aria-label="Sets" data-draft="accessories.${i}.sets" data-num value="${a.sets}"><span class="x">×</span>
       <input type="text" inputmode="numeric" aria-label="Reps" data-draft="accessories.${i}.reps" data-num value="${a.reps}">
       <button class="icon-btn" data-action="acc-move" data-i="${i}" data-delta="-1" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
@@ -885,9 +909,11 @@ const actions = {
   'close-sheet'() { closeSheet(); },
   'add-entry'(el) { addEntry(el.dataset.id); },
   'create-and-add'() {
-    const name = sheet.querySelector('[data-newex]').value.trim();
-    if (!name) return;
-    const ex = { id: core.uid(), name, category: 'accessory', tm: null, increment: store.UNIT_DEFAULTS[unit()].upperInc, notes: '' };
+    const name = (sheet.querySelector('[data-newex]').value || sheet.querySelector('[data-filter="picker"]').value).trim();
+    if (!name) { toast('Type a name for the new exercise'); return; }
+    const dupe = S.exercises.find((e) => e.name.toLowerCase() === name.toLowerCase());
+    if (dupe) { addEntry(dupe.id); return; }
+    const ex = { id: core.uid(), name, group: groupOf(name), category: 'accessory', tm: null, increment: store.UNIT_DEFAULTS[unit()].upperInc, notes: '' };
     S.exercises.push(ex);
     addEntry(ex.id);
   },
@@ -925,6 +951,7 @@ const actions = {
     const d = ui.draft;
     d.name = (d.name || '').trim();
     if (!d.name) { toast('Give the exercise a name'); return; }
+    if (S.exercises.some((e) => e.id !== d.id && e.name.toLowerCase() === d.name.toLowerCase())) { toast(`"${d.name}" already exists`); return; }
     const existing = exById(d.id);
     if (existing) {
       const newTm = d.tm;
@@ -1054,7 +1081,20 @@ document.addEventListener('input', (ev) => {
     document.getElementById('tool-1rm').innerHTML = tool1rm();
   } else if (el.dataset.filter === 'picker') {
     const q = el.value.trim().toLowerCase();
-    sheet.querySelectorAll('.pick').forEach((b) => { b.hidden = q && !b.dataset.name.includes(q); });
+    sheet.querySelectorAll('.pick-group').forEach((g) => {
+      let any = false;
+      g.querySelectorAll('.pick').forEach((b) => { b.hidden = !!q && !matches(b.dataset.name, q); any ||= !b.hidden; });
+      g.hidden = !any || (!!q && g.querySelector('.group-title').textContent === 'Recent');
+    });
+  } else if (el.dataset.filter === 'exlist') {
+    const q = el.value.trim().toLowerCase();
+    ui.exSearch = el.value;
+    view.querySelectorAll('.ex-group').forEach((g) => {
+      let n = 0;
+      g.querySelectorAll('.row-card').forEach((r) => { r.hidden = !!q && !matches(r.dataset.name, q); if (!r.hidden) n++; });
+      g.hidden = n === 0;
+      g.open = !!q || g.dataset.default === 'open';
+    });
   }
 });
 

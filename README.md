@@ -7,6 +7,7 @@ An offline-first web app (PWA) for Jim Wendler's 5/3/1. Add it to your iPhone ho
 - **Kilograms or pounds**: kg by default; switch anytime in Settings, with optional conversion of all stored weights.
 - **5/3/1 programming**: training maxes entered directly (no hidden 90% multiplier), 5s / 3s / 5/3/1 weeks plus optional deload, 3/5/1 week order, classic PR (AMRAP) sets or 5's PRO, optional warm-ups, rounding to your smallest plate.
 - **Supplemental templates**: FSL, SSL, BBB, BBS, or a custom % of TM, with sets/reps you can change.
+- **Exercise library**: about 250 built-in exercises and variations (barbell, dumbbell, cable, machine, paused, deficit, tempo…) in 10 groups, searchable with abbreviations like `db row`, `rdl`, `ohp`.
 - **Customizable exercises**: add, rename or delete main lifts and accessories; each main lift has its own TM and per-cycle increment.
 - **Customizable training days**: choose 1–7 days per week; each day has a name, any exercise as its main lift (with its training max), supplemental work, and an ordered accessory list.
 - **Workout logging**: pre-filled weights, tap ✓ to log a set, editable weight/reps, add/remove sets and exercises, plate breakdown for every bar weight, rest timer with sound, workout notes.
@@ -42,6 +43,7 @@ python3 -m http.server 8080   # then open http://localhost:8080
 | File | Purpose |
 | --- | --- |
 | `js/core.js` | Pure logic: weeks, percentages, supplemental, e1RM, PRs, plates, TM progression |
+| `js/library.js` | Built-in exercise library. Bump `LIBRARY_VERSION` when adding names |
 | `js/store.js` | Default data, persistence, schema normalization |
 | `js/app.js` | UI: views, routing, events, rest timer |
 | `css/app.css` | Styles (light/dark) |
