@@ -78,6 +78,21 @@ const backHeader = (title, back, sub = '', right = '') => `
     <div><a class="back" href="${back}">‹ Back</a><h1>${title}</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${right}
   </header>`;
 
+// ---------- Units ----------
+const unitSwitch = () => `<div class="segmented">${['kg', 'lb'].map((u) => `<button class="${unit() === u ? 'active' : ''}" data-action="set-unit" data-unit="${u}">${u === 'kg' ? 'Kilograms (kg)' : 'Pounds (lb)'}</button>`).join('')}</div>`;
+
+function changeUnit(to) {
+  const from = S.settings.unit;
+  if (to === from || !store.UNIT_DEFAULTS[to]) return false;
+  const hasData = S.workouts.length || S.activeWorkout || S.exercises.some((e) => e.tm > 0);
+  const convert = hasData && confirm(`Convert all stored weights from ${from} to ${to}?\n\nOK = convert the numbers, Cancel = keep the numbers and just relabel them.`);
+  const d = store.UNIT_DEFAULTS[to];
+  if (convert) core.convertWeights(S, to === 'kg' ? 1 / core.LB_PER_KG : core.LB_PER_KG, d.rounding);
+  else if (!hasData) for (const e of S.exercises) e.increment = e.increment >= (from === 'kg' ? 5 : 10) ? d.lowerInc : d.upperInc;
+  Object.assign(S.settings, { unit: to, rounding: d.rounding, barWeight: d.barWeight, plates: d.plates });
+  return true;
+}
+
 // ---------- Train (today) ----------
 function viewToday() {
   const c = S.cycle;
@@ -99,6 +114,7 @@ function viewToday() {
   if (missing.length) {
     h += `<section class="card">
       <h2>Set your training maxes</h2>
+      ${unitSwitch()}
       <p class="muted">Enter a recent or estimated 1-rep max. Your training max is ${Math.round(S.settings.tmPercent * 100)}% of it, rounded to ${wt(S.settings.rounding)} ${unit()}.</p>
       <div class="setup-grid">${missing.map((e) => `
         <label class="field"><span>${esc(e.name)} 1RM</span>
@@ -142,7 +158,8 @@ function viewToday() {
     </article>`;
   }
   h += `</div>
-    <button class="btn block ghost" data-action="start-empty">+ Start an empty workout</button>`;
+    <button class="btn block ghost" data-action="start-empty">+ Start an empty workout</button>
+    <a class="btn block ghost" href="#/lifts/days">Edit training days & main lifts</a>`;
   return h;
 }
 
@@ -470,19 +487,23 @@ function viewProgress(exId) {
 function viewProgram() {
   const seg = `<div class="segmented">
     <button class="${ui.programTab === 'lifts' ? 'active' : ''}" data-action="program-tab" data-tab="lifts">Exercises</button>
-    <button class="${ui.programTab === 'sessions' ? 'active' : ''}" data-action="program-tab" data-tab="sessions">Sessions</button></div>`;
-  let h = header('Program', 'Customize exercises and workout sessions') + seg;
+    <button class="${ui.programTab === 'sessions' ? 'active' : ''}" data-action="program-tab" data-tab="sessions">Training days</button></div>`;
+  let h = header('Program', 'Customize exercises and training days') + seg;
   if (ui.programTab === 'sessions') {
-    h += `<p class="muted small">Sessions run in this order each week. Finishing every session advances the week.</p>`;
+    const n = S.templates.length;
+    h += `<section class="card"><div class="setting">
+      <div><span><b>Training days per week</b></span><small>Days run in this order. The week advances once every day is done.</small></div>
+      <div class="stepper"><button class="icon-btn" data-action="days" data-delta="-1" aria-label="Remove a day" ${n <= 1 ? 'disabled' : ''}>−</button><b>${n}</b><button class="icon-btn" data-action="days" data-delta="1" aria-label="Add a day" ${n >= 7 ? 'disabled' : ''}>+</button></div>
+    </div></section>`;
     S.templates.forEach((t, i) => {
       const lift = exById(t.mainLiftId);
       h += `<div class="card row-card">
-        <a href="#/session/${t.id}" class="grow"><strong>${esc(t.name)}</strong><div class="muted small">${esc(lift?.name || 'No main lift')} · ${esc(core.SUPPLEMENTAL_TYPES[t.supplemental?.type || 'none']?.label || '')} · ${(t.accessories || []).length} accessories</div></a>
+        <a href="#/session/${t.id}" class="grow"><div class="eyebrow">Day ${i + 1}</div><strong>${esc(t.name)}</strong><div class="muted small">Main: ${esc(lift?.name || 'none')}${lift ? ` (TM ${wt(lift.tm)} ${unit()})` : ''} · ${esc(core.SUPPLEMENTAL_TYPES[t.supplemental?.type || 'none']?.label.replace(/ \(.*\)/, '') || '')} · ${(t.accessories || []).length} accessories</div></a>
         <button class="icon-btn" data-action="move-session" data-i="${i}" data-delta="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
         <button class="icon-btn" data-action="move-session" data-i="${i}" data-delta="1" ${i === S.templates.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
       </div>`;
     });
-    return h + `<a class="btn block ghost" href="#/session/new">+ New session</a>`;
+    return h;
   }
   const row = (e) => {
     const best = core.bestE1rm(S.workouts, e.id, S.settings.formula);
@@ -534,18 +555,25 @@ function viewSession(id) {
   }));
   d.supplemental ||= { type: 'none' };
   const sType = d.supplemental.type || 'none';
+  const mainLift = exById(d.mainLiftId);
   const opt = (list, sel, blank) => (blank ? `<option value="" ${!sel ? 'selected' : ''}>${blank}</option>` : '') + list.map((e) => `<option value="${e.id}" ${e.id === sel ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
-  let h = backHeader(id === 'new' ? 'New session' : esc(existing.name), '#/lifts');
+  let h = backHeader(id === 'new' ? 'New training day' : esc(existing.name), '#/lifts/days');
   h += `<section class="card">
     <label class="field"><span>Name</span><input type="text" data-draft="name" value="${esc(d.name)}"></label>
-    <label class="field"><span>Main lift</span><select data-draft="mainLiftId">${opt(mainLifts(), d.mainLiftId, 'None')}</select></label>
+    <label class="field"><span>Main lift</span><select data-draft="mainLiftId" data-rerender>
+      <option value="" ${!d.mainLiftId ? 'selected' : ''}>None (accessories only)</option>
+      <optgroup label="Main lifts">${opt(mainLifts(), d.mainLiftId)}</optgroup>
+      <optgroup label="Other exercises (becomes a main lift)">${opt(S.exercises.filter((e) => e.category !== 'main'), d.mainLiftId)}</optgroup>
+    </select></label>
+    ${mainLift ? `<label class="field"><span>${esc(mainLift.name)} training max (${unit()})</span><input type="text" inputmode="decimal" data-draft="_tm" data-num value="${d._tm ?? mainLift.tm ?? ''}" placeholder="e.g. ${unit() === 'kg' ? 100 : 225}"></label>
+      <div class="row-field"><input type="text" inputmode="decimal" placeholder="Or enter 1RM (${unit()})" data-onerm><button class="btn small" data-action="session-tm-from-1rm">Use ${Math.round(S.settings.tmPercent * 100)}%</button></div>` : ''}
   </section>
   <section class="card"><h2>Supplemental</h2>
     <label class="field"><span>Template</span><select data-draft="supplemental.type" data-rerender>
       ${Object.entries(core.SUPPLEMENTAL_TYPES).map(([k, v]) => `<option value="${k}" ${k === sType ? 'selected' : ''}>${v.label}</option>`).join('')}</select></label>`;
   if (sType !== 'none') {
     const def = core.SUPPLEMENTAL_TYPES[sType];
-    h += `<label class="field"><span>Lift</span><select data-draft="supplemental.liftId">${opt(mainLifts(), d.supplemental.liftId, 'Same as main lift')}</select></label>
+    h += `<label class="field"><span>Lift</span><select data-draft="supplemental.liftId">${opt(mainLifts().filter((e) => e.id !== d.mainLiftId), d.supplemental.liftId, 'Same as main lift')}</select></label>
       <div class="grid3">
         <label class="field"><span>Sets</span><input type="text" inputmode="numeric" data-draft="supplemental.sets" data-num value="${d.supplemental.sets ?? def.sets}"></label>
         <label class="field"><span>Reps</span><input type="text" inputmode="numeric" data-draft="supplemental.reps" data-num value="${d.supplemental.reps ?? def.reps}"></label>
@@ -563,7 +591,7 @@ function viewSession(id) {
       <button class="icon-btn danger" data-action="acc-remove" data-i="${i}" aria-label="Remove">×</button></div>`).join('') || '<p class="muted small">No accessories yet.</p>'}
     <button class="link" data-action="acc-add">+ Add accessory</button></section>
     <div class="actions">${existing ? '<button class="btn danger-ghost" data-action="delete-session">Delete</button>' : ''}
-      <button class="btn primary grow" data-action="save-session">Save session</button></div>`;
+      <button class="btn primary grow" data-action="save-session">Save training day</button></div>`;
   return h;
 }
 
@@ -762,7 +790,7 @@ function render() {
     }
     case 'history': html = viewHistory(); break;
     case 'progress': html = viewProgress(arg); break;
-    case 'lifts': html = viewProgram(); break;
+    case 'lifts': if (arg === 'days') ui.programTab = 'sessions'; html = viewProgram(); break;
     case 'exercise': html = viewExercise(arg); break;
     case 'session': html = viewSession(arg); break;
     case 'settings': html = viewSettings(); break;
@@ -797,6 +825,7 @@ function readDraftInput(el) {
   else if ('pct' in el.dataset) v = num(v) == null ? null : num(v) / 100;
   else if (el.tagName === 'SELECT' && v === '') v = null;
   setPath(ui.draft, el.dataset.draft, v);
+  if (el.dataset.draft === 'mainLiftId') delete ui.draft._tm;
 }
 
 // ---------- actions ----------
@@ -820,6 +849,7 @@ const actions = {
     S.cycle = { number: S.cycle.number + 1, week: 1, done: [], complete: false, startedAt: new Date().toISOString() };
     persist(); render(); toast(`Cycle ${S.cycle.number} started`);
   },
+  'set-unit'(el) { if (changeUnit(el.dataset.unit)) { persist(); render(); } },
   'set-week'(el) {
     S.cycle.week = Number(el.dataset.week);
     S.cycle.complete = false;
@@ -947,20 +977,50 @@ const actions = {
     render();
   },
   'acc-remove'(el) { ui.draft.accessories.splice(Number(el.dataset.i), 1); render(); },
+  'session-tm-from-1rm'() {
+    const v = num(document.querySelector('[data-onerm]')?.value);
+    if (!(v > 0)) { toast('Enter a 1RM first'); return; }
+    ui.draft._tm = core.trainingMaxFrom1rm(v, S.settings.tmPercent, S.settings.rounding);
+    render();
+  },
+  'days'(el) {
+    if (Number(el.dataset.delta) > 0) {
+      if (S.templates.length >= 7) return;
+      const used = new Set(S.templates.map((t) => t.mainLiftId));
+      const lifts = mainLifts();
+      const fresh = lifts.find((e) => !used.has(e.id));
+      const lift = fresh || lifts[S.templates.length % Math.max(lifts.length, 1)] || null;
+      S.templates.push({ id: core.uid(), name: fresh ? `${fresh.name} Day` : `Day ${S.templates.length + 1}`, mainLiftId: lift?.id ?? null, supplemental: { type: 'fsl', liftId: null, sets: 5, reps: 5, pct: null }, accessories: [] });
+      toast('Day added — tap it to choose its main lift');
+    } else {
+      const last = S.templates.at(-1);
+      if (S.templates.length <= 1 || !confirm(`Remove "${last.name}"? Past workouts are kept.`)) return;
+      S.templates.pop();
+      if (S.cycle.complete === false) maybeAdvanceWeek({ templateId: S.templates[0]?.id, cycle: S.cycle.number, week: S.cycle.week });
+    }
+    persist(); render();
+  },
   'save-session'() {
     const d = ui.draft;
-    d.name = (d.name || '').trim() || 'Session';
+    d.name = (d.name || '').trim() || 'Training day';
+    const lift = exById(d.mainLiftId);
+    if (lift) {
+      if (lift.category !== 'main') { lift.category = 'main'; toast(`${lift.name} is now a main lift`); }
+      if (d._tm > 0) setTm(lift, d._tm);
+    }
+    delete d._tm;
     d.accessories = d.accessories.filter((a) => exById(a.exerciseId)).map((a) => ({ ...a, sets: Math.max(1, a.sets || 1), reps: Math.max(1, a.reps || 1) }));
     const i = S.templates.findIndex((t) => t.id === d.id);
     if (i >= 0) S.templates[i] = d; else S.templates.push(d);
     ui.draftKey = null;
-    persist(); toast('Session saved'); go('#/lifts');
+    persist(); toast('Training day saved'); go('#/lifts/days');
   },
   'delete-session'() {
-    if (!confirm('Delete this session? Past workouts are kept.')) return;
+    if (S.templates.length <= 1) { toast('You need at least one training day'); return; }
+    if (!confirm('Delete this training day? Past workouts are kept.')) return;
     S.templates = S.templates.filter((t) => t.id !== ui.draft.id);
     ui.draftKey = null;
-    persist(); go('#/lifts');
+    persist(); go('#/lifts/days');
   },
   'force-cycle-end'() {
     if (!confirm(`End cycle ${S.cycle.number} now and review training maxes?`)) return;
@@ -1031,12 +1091,7 @@ document.addEventListener('change', async (ev) => {
     const key = el.dataset.setting;
     const t = el.dataset.type;
     if (key === 'unit') {
-      const to = el.value, from = S.settings.unit;
-      if (to === from) return;
-      const convert = confirm(`Convert all stored weights from ${from} to ${to}?\n\nOK = convert numbers, Cancel = keep numbers and just relabel.`);
-      const d = store.UNIT_DEFAULTS[to];
-      if (convert) core.convertWeights(S, to === 'kg' ? 1 / core.LB_PER_KG : core.LB_PER_KG, d.rounding);
-      Object.assign(S.settings, { unit: to, rounding: d.rounding, barWeight: d.barWeight, plates: d.plates });
+      if (!changeUnit(el.value)) return;
     } else if (t === 'bool') S.settings[key] = el.checked;
     else if (t === 'num') { const v = num(el.value); if (v != null && v >= 0) S.settings[key] = v; }
     else if (t === 'pct') { const v = num(el.value); if (v > 0 && v <= 100) S.settings[key] = v / 100; }

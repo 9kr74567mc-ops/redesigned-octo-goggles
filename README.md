@@ -4,10 +4,11 @@ An offline-first web app (PWA) for Jim Wendler's 5/3/1. Add it to your iPhone ho
 
 ## Features
 
+- **Kilograms or pounds**: kg by default; switch anytime in Settings, with optional conversion of all stored weights.
 - **5/3/1 programming**: training max (configurable % of 1RM), 5s / 3s / 5/3/1 weeks plus optional deload, 3/5/1 week order, classic PR (AMRAP) sets or 5's PRO, optional warm-ups, rounding to your smallest plate.
 - **Supplemental templates**: FSL, SSL, BBB, BBS, or a custom % of TM, with sets/reps you can change.
 - **Customizable exercises**: add, rename or delete main lifts and accessories; each main lift has its own TM and per-cycle increment.
-- **Customizable sessions**: name, main lift, supplemental work, and an ordered accessory list per session. Any number of sessions per week.
+- **Customizable training days**: choose 1–7 days per week; each day has a name, any exercise as its main lift (with its training max), supplemental work, and an ordered accessory list.
 - **Workout logging**: pre-filled weights, tap ✓ to log a set, editable weight/reps, add/remove sets and exercises, plate breakdown for every bar weight, rest timer with sound, workout notes.
 - **Estimated 1RM**: Epley, Brzycki, or their average. PR sets show "N reps beats your e1RM PR" live, and you get a PR summary when you finish.
 - **Automatic cycle tracking**: finishing every session advances the week; at cycle end it suggests new TMs (+increment, or −10% if a PR set missed its minimum reps) for you to review.
